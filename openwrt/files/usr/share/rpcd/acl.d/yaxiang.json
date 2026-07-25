@@ -1,0 +1,14 @@
+{
+    "yaxiang-readonly": {
+        "description": "亚象只读系统信息接口",
+        "read": {
+            "ubus": {
+                "*": ["*"]
+            },
+            "uci": {
+                "*": ["*"]
+            }
+        },
+        "write": {}
+    }
+}

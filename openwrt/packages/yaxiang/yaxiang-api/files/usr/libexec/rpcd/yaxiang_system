@@ -1,0 +1,69 @@
+#!/bin/sh
+# Yaxiang OS - System API via rpcd/ubus
+# Read-only system information endpoints
+
+case "$1" in
+  list)
+    cat <<EOF
+{
+  "system.info": {},
+  "system.version": {},
+  "system.resources": {},
+  "system.services": {}
+}
+EOF
+  ;;
+
+  call)
+    method="$2"
+    case "$method" in
+      system.info)
+        # System board info from ubus
+        BOARD=$(ubus call system board 2>/dev/null || echo '{}')
+        HOSTNAME=$(cat /etc/yaxiang-release 2>/dev/null | grep PRODUCT_SHORT_NAME | cut -d"'" -f2 || hostname)
+        echo "{\"hostname\":\"${HOSTNAME}\",\"board\":${BOARD}}"
+        ;;
+
+      system.version)
+        # Version info from yaxiang-release
+        if [ -f /etc/yaxiang-release ]; then
+          . /etc/yaxiang-release
+          echo "{\"product_name\":\"${PRODUCT_NAME}\",\"product_version\":\"${PRODUCT_VERSION}\",\"openwrt_version\":\"${OPENWRT_VERSION}\",\"build_id\":\"${BUILD_ID}\",\"build_date\":\"${BUILD_DATE}\",\"source_commit\":\"${SOURCE_COMMIT}\"}"
+        else
+          echo "{\"implemented\":false,\"source\":\"unavailable\",\"reason\":\"版本信息文件缺失\"}"
+        fi
+        ;;
+
+      system.resources)
+        # CPU, memory, disk info
+        CPU_INFO=$(cat /proc/cpuinfo 2>/dev/null | grep "model name" | head -1 | cut -d: -f2 | xargs || echo "unknown")
+        CPU_CORES=$(nproc 2>/dev/null || grep -c processor /proc/cpuinfo 2>/dev/null || echo "1")
+        MEM_TOTAL=$(awk '/MemTotal/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo "0")
+        MEM_FREE=$(awk '/MemAvailable/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo "0")
+        ROOT_FREE=$(df -m / 2>/dev/null | awk 'NR==2 {print $4}' || echo "0")
+        UPTIME=$(cat /proc/uptime 2>/dev/null | awk '{print int($1)}' || echo "0")
+        echo "{\"cpu\":\"${CPU_INFO}\",\"cpu_cores\":${CPU_CORES},\"mem_total_mb\":${MEM_TOTAL},\"mem_free_mb\":${MEM_FREE},\"root_free_mb\":${ROOT_FREE},\"uptime_seconds\":${UPTIME}}"
+        ;;
+
+      system.services)
+        # List running services
+        SERVICES="[]"
+        for svc in uhttpd rpcd dnsmasq dropbear firewall odhcpd; do
+          if /etc/init.d/$svc enabled 2>/dev/null; then
+            STATUS="running"
+            /etc/init.d/$svc running 2>/dev/null || STATUS="stopped"
+          else
+            STATUS="disabled"
+          fi
+          SERVICES="${SERVICES%]}, {\"name\":\"${svc}\",\"status\":\"${STATUS}\"}"
+        done
+        SERVICES="[${SERVICES# }]"
+        echo "{\"services\":${SERVICES}}"
+        ;;
+
+      *)
+        echo "{\"implemented\":false,\"source\":\"unavailable\",\"reason\":\"未知方法: ${method}\"}"
+        ;;
+    esac
+  ;;
+esac

@@ -1,0 +1,61 @@
+#!/bin/sh
+# 亚象网络操作系统首次启动配置
+
+# 设置主机名
+uci set system.@system[0].hostname='Yaxiang-Gateway'
+uci set system.@system[0].timezone='CST-8'
+uci set system.@system[0].log_size='256'
+uci commit system
+
+# LAN 默认地址
+uci set network.lan.ipaddr='192.168.1.1'
+uci set network.lan.netmask='255.255.255.0'
+uci set network.lan.proto='static'
+uci commit network
+
+# DHCP 默认开启
+uci set dhcp.lan.ignore='0'
+uci commit dhcp
+
+# uhttpd 仅监听 LAN
+uci set uhttpd.main.listen_http='192.168.1.1:80'
+uci delete uhttpd.main.listen_http2 2>/dev/null || true
+uci commit uhttpd
+
+# SSH 仅允许 LAN
+uci set dropbear.@dropbear[0].Interface='lan'
+uci set dropbear.@dropbear[0].Port='22'
+uci commit dropbear
+
+# 禁用 UPnP
+uci set upnpd.config.enabled='0' 2>/dev/null || true
+uci commit upnpd 2>/dev/null || true
+
+# 启用服务
+/etc/init.d/uhttpd enable
+/etc/init.d/rpcd enable
+/etc/init.d/yaxiang-rpcd enable
+/etc/init.d/yaxiang-backend enable
+/etc/init.d/dnsmasq enable
+/etc/init.d/dropbear enable
+
+# 创建版本和构建信息文件
+cat > /etc/yaxiang-version <<'VER'
+NAME=亚象网络操作系统
+VERSION=V0.2-dev
+BUILD_DATE=__BUILD_DATE__
+TARGET=x86_64
+OPENWRT_VERSION=25.12.5
+VER
+sed -i "s/__BUILD_DATE__/$(date -u +%Y-%m-%dT%H:%M:%SZ)/" /etc/yaxiang-version
+
+# 创建品牌信息
+cat > /etc/yaxiang-brand <<'BRAND'
+brandName=亚象
+productName=亚象网络操作系统
+englishName=Yaxiang OS
+version=V0.2-dev
+gatewayName=亚象网关
+BRAND
+
+exit 0

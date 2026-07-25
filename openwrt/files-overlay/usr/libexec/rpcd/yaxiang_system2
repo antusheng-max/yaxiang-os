@@ -1,0 +1,153 @@
+#!/bin/sh
+# Yaxiang OS - System Management API via rpcd/ubus
+
+json_ok() { printf '{"success":true,"implemented":true,"source":"system","data":%s,"message":"","changed":%s}\n' "$1" "${2:-false}"; }
+json_err() { printf '{"success":false,"implemented":true,"source":"system","data":null,"message":"%s"}\n' "$1"; }
+
+case "$1" in
+  list)
+    cat <<EOF
+{
+  "sys.info": {},
+  "sys.hostname_get": {},
+  "sys.hostname_set": {"hostname":"Yaxiang-Gateway"},
+  "sys.timezone_get": {},
+  "sys.timezone_set": {"timezone":"CST-8"},
+  "sys.ntp_get": {},
+  "sys.ntp_set": {"servers":"ntp.aliyun.com"},
+  "sys.services": {},
+  "sys.service_action": {"name":"uhttpd","action":"restart"},
+  "sys.log": {"type":"system","lines":"100"},
+  "sys.backup": {},
+  "sys.reboot": {},
+  "sys.password_set": {"old":"x","new":"y"},
+  "sys.packages": {},
+  "sys.version": {}
+}
+EOF
+  ;;
+  call)
+    method="$2"
+    case "$method" in
+      sys.info)
+        HOSTNAME=$(hostname 2>/dev/null || echo "unknown")
+        UPTIME=$(cat /proc/uptime 2>/dev/null | awk '{print int($1)}')
+        LOAD=$(cat /proc/loadavg 2>/dev/null | awk '{print $1","$2","$3}')
+        MEM_TOTAL=$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null)
+        MEM_FREE=$(awk '/MemAvailable/ {print $2}' /proc/meminfo 2>/dev/null)
+        KERNEL=$(uname -r 2>/dev/null)
+        ARCH=$(uname -m 2>/dev/null)
+        YAXIANG_VER=$(cat /etc/yaxiang-release 2>/dev/null || echo "unknown")
+        OPENWRT_VER=$(cat /etc/openwrt_release 2>/dev/null | grep DISTRIB_DESCRIPTION | cut -d"'" -f2 || echo "")
+        json_ok "{\"hostname\":\"${HOSTNAME}\",\"uptime\":${UPTIME:-0},\"load\":\"${LOAD}\",\"mem_total_kb\":${MEM_TOTAL:-0},\"mem_free_kb\":${MEM_FREE:-0},\"kernel\":\"${KERNEL}\",\"arch\":\"${ARCH}\",\"yaxiang_version\":\"${YAXIANG_VER}\",\"openwrt_version\":\"${OPENWRT_VER}\"}"
+        ;;
+      sys.hostname_get)
+        json_ok "{\"hostname\":\"$(hostname 2>/dev/null)\"}"
+        ;;
+      sys.hostname_set)
+        read -r input
+        HN=$(echo "$input" | jsonfilter -e '@.hostname' 2>/dev/null | tr -cd 'a-zA-Z0-9._-')
+        [ -z "$HN" ] && { json_err "hostname required"; exit 0; }
+        uci set system.@system[0].hostname="$HN" 2>/dev/null
+        uci commit system 2>/dev/null
+        hostname "$HN" 2>/dev/null
+        json_ok "{\"hostname\":\"${HN}\"}" true
+        ;;
+      sys.timezone_get)
+        TZ=$(uci get system.@system[0].timezone 2>/dev/null || echo "UTC")
+        json_ok "{\"timezone\":\"${TZ}\"}"
+        ;;
+      sys.timezone_set)
+        read -r input
+        TZ=$(echo "$input" | jsonfilter -e '@.timezone' 2>/dev/null | tr -cd 'a-zA-Z0-9/+-')
+        [ -z "$TZ" ] && { json_err "timezone required"; exit 0; }
+        uci set system.@system[0].timezone="$TZ" 2>/dev/null
+        uci commit system 2>/dev/null
+        json_ok "{\"timezone\":\"${TZ}\"}" true
+        ;;
+      sys.ntp_get)
+        SERVERS=$(uci get system.ntp.server 2>/dev/null || echo "")
+        ENABLED=$(uci get system.ntp.enabled 2>/dev/null || echo "1")
+        json_ok "{\"servers\":\"${SERVERS}\",\"enabled\":$([ \"$ENABLED\" = \"1\" ] && echo true || echo false)}"
+        ;;
+      sys.ntp_set)
+        read -r input
+        SERVERS=$(echo "$input" | jsonfilter -e '@.servers' 2>/dev/null | tr -cd 'a-zA-Z0-9. -')
+        [ -n "$SERVERS" ] && { uci set system.ntp.server="$SERVERS" 2>/dev/null; uci commit system 2>/dev/null; }
+        json_ok "{\"servers\":\"${SERVERS}\"}" true
+        ;;
+      sys.services)
+        RESULT="["
+        FIRST=1
+        for svc in uhttpd rpcd dnsmasq network firewall cron urandom_seed yaxiang-core; do
+          RUNNING=$(/etc/init.d/$svc running 2>/dev/null && echo "true" || echo "false")
+          ENABLED=$(/etc/init.d/$svc enabled 2>/dev/null && echo "true" || echo "false")
+          [ $FIRST -eq 0 ] && RESULT="${RESULT},"
+          RESULT="${RESULT}{\"name\":\"${svc}\",\"running\":${RUNNING},\"enabled\":${ENABLED}}"
+          FIRST=0
+        done
+        RESULT="${RESULT}]"
+        json_ok "{\"services\":${RESULT}}"
+        ;;
+      sys.service_action)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_-')
+        ACTION=$(echo "$input" | jsonfilter -e '@.action' 2>/dev/null | tr -cd 'a-z')
+        [ -z "$NAME" ] || [ -z "$ACTION" ] && { json_err "name and action required"; exit 0; }
+        case "$ACTION" in start|stop|restart|enable|disable) ;; *) json_err "invalid action"; exit 0 ;; esac
+        /etc/init.d/$NAME $ACTION 2>/dev/null
+        json_ok "{\"name\":\"${NAME}\",\"action\":\"${ACTION}\"}" true
+        ;;
+      sys.log)
+        read -r input
+        LINES=$(echo "$input" | jsonfilter -e '@.lines' 2>/dev/null | tr -cd '0-9')
+        LINES=${LINES:-100}
+        LOG=$(logread 2>/dev/null | tail -n "$LINES" | sed 's/"/\\"/g' | tr '\n' '|')
+        json_ok "{\"log\":\"${LOG}\"}"
+        ;;
+      sys.backup)
+        BACKUP_FILE="/tmp/yaxiang-backup-$(date +%Y%m%d%H%M%S).tar.gz"
+        sysupgrade -b "$BACKUP_FILE" 2>/dev/null
+        if [ -f "$BACKUP_FILE" ]; then
+          SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
+          json_ok "{\"file\":\"${BACKUP_FILE}\",\"size\":\"${SIZE}\"}"
+        else
+          json_err "backup failed"
+        fi
+        ;;
+      sys.reboot)
+        json_ok "{\"action\":\"rebooting\"}" true
+        sleep 1
+        reboot 2>/dev/null
+        ;;
+      sys.password_set)
+        read -r input
+        NEW=$(echo "$input" | jsonfilter -e '@.new' 2>/dev/null)
+        [ -z "$NEW" ] && { json_err "new password required"; exit 0; }
+        echo "root:${NEW}" | chpasswd 2>/dev/null
+        json_ok "{\"action\":\"password_changed\"}" true
+        ;;
+      sys.packages)
+        RESULT="["
+        FIRST=1
+        for pkg in $(opkg list-installed 2>/dev/null | grep -i yaxiang | cut -d' ' -f1); do
+          VER=$(opkg list-installed 2>/dev/null | grep "^$pkg " | awk '{print $3}')
+          [ $FIRST -eq 0 ] && RESULT="${RESULT},"
+          RESULT="${RESULT}{\"name\":\"${pkg}\",\"version\":\"${VER}\"}"
+          FIRST=0
+        done
+        RESULT="${RESULT}]"
+        json_ok "{\"packages\":${RESULT}}"
+        ;;
+      sys.version)
+        YAXIANG_VER=$(cat /etc/yaxiang-release 2>/dev/null || echo "unknown")
+        OPENWRT_VER=$(cat /etc/openwrt_release 2>/dev/null | grep DISTRIB_DESCRIPTION | cut -d"'" -f2 || echo "")
+        KERNEL=$(uname -r 2>/dev/null)
+        json_ok "{\"yaxiang\":\"${YAXIANG_VER}\",\"openwrt\":\"${OPENWRT_VER}\",\"kernel\":\"${KERNEL}\"}"
+        ;;
+      *)
+        printf '{"success":false,"implemented":false,"source":"unavailable","data":null,"message":"该功能尚未接入真实系统"}\n'
+        ;;
+    esac
+  ;;
+esac

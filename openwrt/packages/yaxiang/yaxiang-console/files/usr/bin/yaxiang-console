@@ -1,0 +1,237 @@
+#!/bin/sh
+# Yaxiang OS System Console
+# Menu-driven interface for local system management
+# Run via: yaxiang-console
+
+set -e
+
+# ===== Colors =====
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# ===== Header =====
+print_header() {
+  echo ""
+  echo -e "${BLUE}╔══════════════════════════════════════╗${NC}"
+  echo -e "${BLUE}║     亚象网络操作系统 Yaxiang OS      ║${NC}"
+  echo -e "${BLUE}║          系统控制台 v0.2-dev         ║${NC}"
+  echo -e "${BLUE}╚══════════════════════════════════════╝${NC}"
+  echo ""
+}
+
+# ===== Menu Items =====
+show_menu() {
+  echo -e "${GREEN}请选择操作:${NC}"
+  echo "  1. 查看系统信息"
+  echo "  2. 查看网卡和链路"
+  echo "  3. 查看管理地址"
+  echo "  4. 修改管理IPv4地址"
+  echo "  5. 重启Web服务"
+  echo "  6. 重置Web管理员密码"
+  echo "  7. 网络连通性诊断"
+  echo "  8. 查看服务状态"
+  echo "  9. 重启系统"
+  echo "  10. 关闭系统"
+  echo "  11. 进入Shell"
+  echo "  0. 退出"
+  echo ""
+  echo -n "请输入选项 [0-11]: "
+}
+
+# ===== Functions =====
+show_system_info() {
+  echo ""
+  echo -e "${YELLOW}=== 系统信息 ===${NC}"
+  [ -f /etc/yaxiang-release ] && . /etc/yaxiang-release
+  echo "产品名称: ${PRODUCT_NAME:-亚象网络操作系统}"
+  echo "产品版本: ${PRODUCT_VERSION:-V0.2-dev}"
+  echo "OpenWrt版本: ${OPENWRT_VERSION:-unknown}"
+  echo "构建ID: ${BUILD_ID:-unknown}"
+  echo "构建时间: ${BUILD_DATE:-unknown}"
+  echo ""
+  echo "主机名: $(hostname)"
+  echo "运行时间: $(uptime)"
+  echo "CPU负载: $(cat /proc/loadavg)"
+  echo "内存: $(free -h 2>/dev/null | awk 'NR==2 {print "总计:"$2" 已用:"$3" 可用:"$4}' || cat /proc/meminfo | head -3)"
+  echo "磁盘: $(df -h / | awk 'NR==2 {print "总计:"$2" 已用:"$3" 可用:"$4}')"
+}
+
+show_network_interfaces() {
+  echo ""
+  echo -e "${YELLOW}=== 网卡和链路状态 ===${NC}"
+  for iface in $(ls /sys/class/net/ 2>/dev/null); do
+    CARRIER=$(cat /sys/class/net/$iface/carrier 2>/dev/null || echo "0")
+    MAC=$(cat /sys/class/net/$iface/address 2>/dev/null || echo "unknown")
+    IP=$(ip addr show $iface 2>/dev/null | grep "inet " | awk '{print $2}' | head -1 || echo "none")
+    STATUS="DOWN"
+    [ "$CARRIER" = "1" ] && STATUS="UP"
+    echo "  $iface: $STATUS | MAC: $MAC | IP: ${IP:-none}"
+  done
+}
+
+show_management_address() {
+  echo ""
+  echo -e "${YELLOW}=== 管理地址 ===${NC}"
+  LAN_IP=$(uci get network.lan.ipaddr 2>/dev/null || echo "192.168.1.1")
+  LAN_MASK=$(uci get network.lan.netmask 2>/dev/null || echo "255.255.255.0")
+  echo "LAN管理地址: ${LAN_IP}/${LAN_MASK}"
+  echo "Web管理: http://${LAN_IP}/"
+  echo "SSH: ssh root@${LAN_IP}"
+}
+
+change_lan_address() {
+  echo ""
+  echo -e "${YELLOW}=== 修改管理IPv4地址 ===${NC}"
+  echo -n "请输入新的IPv4地址 (例如 192.168.1.1): "
+  read NEW_IP
+  echo -n "请输入子网掩码 (例如 255.255.255.0): "
+  read NEW_MASK
+
+  # Validate IP
+  if ! echo "$NEW_IP" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'; then
+    echo -e "${RED}错误: 无效的IPv4地址${NC}"
+    return 1
+  fi
+
+  # Validate mask
+  if ! echo "$NEW_MASK" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'; then
+    echo -e "${RED}错误: 无效的子网掩码${NC}"
+    return 1
+  fi
+
+  # Backup current config
+  cp /etc/config/network /etc/config/network.backup.$(date +%Y%m%d%H%M%S)
+  echo "已备份当前网络配置"
+
+  # Apply changes
+  uci set network.lan.ipaddr="$NEW_IP"
+  uci set network.lan.netmask="$NEW_MASK"
+  uci commit network
+
+  echo -e "${GREEN}管理地址已修改为: ${NEW_IP}/${NEW_MASK}${NC}"
+  echo "注意: 修改后可能需要重新连接网络"
+}
+
+restart_web() {
+  echo ""
+  echo -e "${YELLOW}=== 重启Web服务 ===${NC}"
+  /etc/init.d/uhttpd restart
+  echo -e "${GREEN}Web服务已重启${NC}"
+}
+
+reset_password() {
+  echo ""
+  echo -e "${YELLOW}=== 重置Web管理员密码 ===${NC}"
+  echo -n "请输入新密码: "
+  read -s NEW_PASS
+  echo ""
+  echo -n "请确认新密码: "
+  read -s CONFIRM_PASS
+  echo ""
+
+  if [ "$NEW_PASS" != "$CONFIRM_PASS" ]; then
+    echo -e "${RED}错误: 两次输入的密码不一致${NC}"
+    return 1
+  fi
+
+  if [ -z "$NEW_PASS" ]; then
+    echo -e "${RED}错误: 密码不能为空${NC}"
+    return 1
+  fi
+
+  echo "$NEW_PASS" | passwd root
+  echo -e "${GREEN}密码已重置${NC}"
+}
+
+network_diagnostic() {
+  echo ""
+  echo -e "${YELLOW}=== 网络连通性诊断 ===${NC}"
+  echo "测试DNS解析..."
+  nslookup openwrt.org 2>/dev/null | head -5 || echo "DNS解析失败"
+  echo ""
+  echo "测试网关连通性..."
+  GATEWAY=$(ip route show default 2>/dev/null | awk '{print $3}' | head -1)
+  [ -n "$GATEWAY" ] && ping -c 2 -W 2 "$GATEWAY" 2>/dev/null || echo "无默认网关"
+  echo ""
+  echo "测试外网连通性..."
+  ping -c 2 -W 2 223.5.5.5 2>/dev/null || echo "外网不通"
+}
+
+show_services() {
+  echo ""
+  echo -e "${YELLOW}=== 服务状态 ===${NC}"
+  for svc in uhttpd rpcd dnsmasq dropbear firewall odhcpd yaxiang-core; do
+    if [ -f /etc/init.d/$svc ]; then
+      if /etc/init.d/$svc enabled 2>/dev/null; then
+        /etc/init.d/$svc running 2>/dev/null && STATUS="运行中" || STATUS="已停止"
+      else
+        STATUS="未启用"
+      fi
+      printf "  %-20s %s\n" "$svc" "$STATUS"
+    fi
+  done
+}
+
+reboot_system() {
+  echo ""
+  echo -e "${RED}确定要重启系统吗? (y/N): ${NC}"
+  read CONFIRM
+  if [ "$CONFIRM" = "y" ] || [ "$CONFIRM" = "Y" ]; then
+    echo "系统将在5秒后重启..."
+    sleep 5
+    reboot
+  else
+    echo "已取消"
+  fi
+}
+
+shutdown_system() {
+  echo ""
+  echo -e "${RED}确定要关闭系统吗? (y/N): ${NC}"
+  read CONFIRM
+  if [ "$CONFIRM" = "y" ] || [ "$CONFIRM" = "Y" ]; then
+    echo "系统将在5秒后关闭..."
+    sleep 5
+    poweroff
+  else
+    echo "已取消"
+  fi
+}
+
+enter_shell() {
+  echo ""
+  echo -e "${YELLOW}进入Shell... 输入 exit 返回控制台${NC}"
+  $SHELL || /bin/sh
+}
+
+# ===== Main Loop =====
+print_header
+
+while true; do
+  show_menu
+  read CHOICE
+
+  case "$CHOICE" in
+    1) show_system_info ;;
+    2) show_network_interfaces ;;
+    3) show_management_address ;;
+    4) change_lan_address ;;
+    5) restart_web ;;
+    6) reset_password ;;
+    7) network_diagnostic ;;
+    8) show_services ;;
+    9) reboot_system ;;
+    10) shutdown_system ;;
+    11) enter_shell ;;
+    0) echo "再见!"; exit 0 ;;
+    *) echo -e "${RED}无效选项${NC}" ;;
+  esac
+
+  echo ""
+  echo -n "按回车键继续..."
+  read
+  print_header
+done

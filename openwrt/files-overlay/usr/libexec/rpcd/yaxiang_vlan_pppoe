@@ -1,0 +1,363 @@
+#!/bin/sh
+# Yaxiang OS - VLAN & PPPoE Multi-dial API via rpcd/ubus
+# 802.1Q VLAN管理 + PPPoE多拨 + 自动重拨
+
+NETCTL="/usr/lib/yaxiang/netctl.sh"
+[ -f "$NETCTL" ] && . "$NETCTL"
+
+json_ok() { printf '{"success":true,"implemented":true,"source":"uci","data":%s,"message":"","changed":%s}\n' "$1" "${2:-false}"; }
+json_err() { printf '{"success":false,"implemented":true,"source":"uci","data":null,"message":"%s"}\n' "$1"; }
+
+PPPOE_STATE_DIR="/var/run/yaxiang/pppoe"
+mkdir -p "$PPPOE_STATE_DIR" 2>/dev/null
+
+case "$1" in
+  list)
+    cat <<EOF
+{
+  "vlan.list": {},
+  "vlan.create": {"device":"eth0","vid":"100"},
+  "vlan.delete": {"device":"eth0","vid":"100"},
+  "vlan.validate": {"vid":"100"},
+  "pppoe.list": {},
+  "pppoe.add": {"name":"pppoe1","device":"eth0.100","username":"user","password":"pass","vid":"100"},
+  "pppoe.delete": {"name":"pppoe1"},
+  "pppoe.batch_add": {"base_name":"pppoe","device":"eth0","vid":"100","username":"user","password":"pass","count":"4"},
+  "pppoe.set_enabled": {"name":"pppoe1","enabled":"1"},
+  "pppoe.batch_set_enabled": {"names":"pppoe1,pppoe2","enabled":"1"},
+  "pppoe.reconnect": {"name":"pppoe1"},
+  "pppoe.status": {"name":"pppoe1"},
+  "pppoe.status_all": {}
+}
+EOF
+  ;;
+  call)
+    method="$2"
+    case "$method" in
+
+      # ==================== VLAN ====================
+
+      vlan.list)
+        RESULT="["
+        FIRST=1
+        # 从UCI读取VLAN设备
+        for sec in $(uci show network 2>/dev/null | grep "=device" | cut -d. -f2 | cut -d= -f1); do
+          TYPE=$(uci get network.$sec.type 2>/dev/null || echo "")
+          if [ "$TYPE" = "8021q" ] || echo "$sec" | grep -q "\."; then
+            IFNAME=$(uci get network.$sec.ifname 2>/dev/null || uci get network.$sec.device 2>/dev/null || echo "")
+            VID=$(uci get network.$sec.vid 2>/dev/null || echo "$sec" | sed 's/.*\.//')
+            NAME=$(uci get network.$sec.name 2>/dev/null || echo "$sec")
+            UP=$(ip link show "$NAME" 2>/dev/null | grep -q "UP" && echo "true" || echo "false")
+            [ $FIRST -eq 0 ] && RESULT="${RESULT},"
+            RESULT="${RESULT}{\"name\":\"${NAME}\",\"device\":\"${IFNAME}\",\"vid\":\"${VID}\",\"up\":${UP}}"
+            FIRST=0
+          fi
+        done
+        # 也从/sys/class/net检测已存在的VLAN
+        for iface in $(ls /sys/class/net/ 2>/dev/null | grep "\."); do
+          VID=$(cat /sys/class/net/$iface/addr_len 2>/dev/null || echo "")
+          PARENT=$(cat /sys/class/net/$iface/lower_* 2>/dev/null | head -1 || echo "")
+          # 检查是否已在UCI中
+          EXISTS=0
+          for sec in $(uci show network 2>/dev/null | grep "=device" | cut -d. -f2 | cut -d= -f1); do
+            N=$(uci get network.$sec.name 2>/dev/null || echo "$sec")
+            [ "$N" = "$iface" ] && EXISTS=1 && break
+          done
+          if [ $EXISTS -eq 0 ]; then
+            VID_NUM=$(echo "$iface" | sed 's/.*\.//')
+            BASE=$(echo "$iface" | sed 's/\.[0-9]*$//')
+            [ $FIRST -eq 0 ] && RESULT="${RESULT},"
+            RESULT="${RESULT}{\"name\":\"${iface}\",\"device\":\"${BASE}\",\"vid\":\"${VID_NUM}\",\"up\":true}"
+            FIRST=0
+          fi
+        done
+        RESULT="${RESULT}]"
+        json_ok "{\"vlans\":${RESULT}}"
+        ;;
+
+      vlan.create)
+        read -r input
+        DEVICE=$(echo "$input" | jsonfilter -e '@.device' 2>/dev/null | tr -cd 'a-zA-Z0-9._-')
+        VID=$(echo "$input" | jsonfilter -e '@.vid' 2>/dev/null | tr -cd '0-9')
+        [ -z "$DEVICE" ] || [ -z "$VID" ] && { json_err "device and vid required"; exit 0; }
+        # VID范围验证
+        if [ "$VID" -lt 1 ] || [ "$VID" -gt 4094 ]; then
+          json_err "VLAN ID must be 1-4094"
+          exit 0
+        fi
+        # 检查物理设备存在
+        [ ! -d "/sys/class/net/${DEVICE}" ] && { json_err "device not found: $DEVICE"; exit 0; }
+        VLAN_NAME="${DEVICE}.${VID}"
+        # 检查重复
+        [ -d "/sys/class/net/${VLAN_NAME}" ] && { json_err "VLAN already exists: $VLAN_NAME"; exit 0; }
+        if [ -f "$NETCTL" ]; then
+          netctl_lock || { json_err "lock failed"; exit 0; }
+          netctl_backup network >/dev/null
+          # 创建UCI设备
+          uci set network.${DEVICE}_${VID}=device
+          uci set network.${DEVICE}_${VID}.type=8021q
+          uci set network.${DEVICE}_${VID}.ifname="$DEVICE"
+          uci set network.${DEVICE}_${VID}.vid="$VID"
+          uci set network.${DEVICE}_${VID}.name="$VLAN_NAME"
+          uci commit network
+          # 创建VLAN接口
+          ip link add link "$DEVICE" name "$VLAN_NAME" type vlan id "$VID" 2>/dev/null
+          ip link set "$VLAN_NAME" up 2>/dev/null
+          netctl_unlock
+          netctl_log "VLAN_CREATE" "$VLAN_NAME on $DEVICE"
+          json_ok "{\"name\":\"${VLAN_NAME}\",\"device\":\"${DEVICE}\",\"vid\":${VID}}" true
+        else
+          json_err "netctl not available"
+        fi
+        ;;
+
+      vlan.delete)
+        read -r input
+        DEVICE=$(echo "$input" | jsonfilter -e '@.device' 2>/dev/null | tr -cd 'a-zA-Z0-9._-')
+        VID=$(echo "$input" | jsonfilter -e '@.vid' 2>/dev/null | tr -cd '0-9')
+        [ -z "$DEVICE" ] || [ -z "$VID" ] && { json_err "device and vid required"; exit 0; }
+        VLAN_NAME="${DEVICE}.${VID}"
+        if [ -f "$NETCTL" ]; then
+          netctl_lock || { json_err "lock failed"; exit 0; }
+          netctl_backup network >/dev/null
+          # 删除关联的PPPoE接口
+          for sec in $(uci show network 2>/dev/null | grep "=interface" | cut -d. -f2 | cut -d= -f1); do
+            DEV=$(uci get network.$sec.device 2>/dev/null || echo "")
+            if [ "$DEV" = "$VLAN_NAME" ]; then
+              uci delete network.$sec 2>/dev/null
+            fi
+          done
+          uci delete network.${DEVICE}_${VID} 2>/dev/null
+          uci commit network
+          ip link del "$VLAN_NAME" 2>/dev/null
+          netctl_unlock
+          netctl_log "VLAN_DELETE" "$VLAN_NAME"
+          json_ok "{\"name\":\"${VLAN_NAME}\",\"action\":\"deleted\"}" true
+        else
+          json_err "netctl not available"
+        fi
+        ;;
+
+      vlan.validate)
+        read -r input
+        VID=$(echo "$input" | jsonfilter -e '@.vid' 2>/dev/null | tr -cd '0-9')
+        if [ -z "$VID" ] || [ "$VID" -lt 1 ] || [ "$VID" -gt 4094 ]; then
+          json_ok "{\"valid\":false,\"reason\":\"VLAN ID must be 1-4094\"}"
+        else
+          json_ok "{\"valid\":true}"
+        fi
+        ;;
+
+      # ==================== PPPoE ====================
+
+      pppoe.list)
+        RESULT="["
+        FIRST=1
+        for sec in $(uci show network 2>/dev/null | grep "=interface" | cut -d. -f2 | cut -d= -f1); do
+          PROTO=$(uci get network.$sec.proto 2>/dev/null || echo "")
+          if [ "$PROTO" = "pppoe" ]; then
+            DEVICE=$(uci get network.$sec.device 2>/dev/null || echo "")
+            USERNAME=$(uci get network.$sec.username 2>/dev/null || echo "")
+            DESC=$(uci get network.$sec.description 2>/dev/null || echo "")
+            MTU=$(uci get network.$sec.mtu 2>/dev/null || echo "1492")
+            # 密码脱敏
+            HAS_PASS="false"
+            uci get network.$sec.password >/dev/null 2>&1 && HAS_PASS="true"
+            # 运行状态
+            STATUS=$(ubus call network.interface.$sec status 2>/dev/null)
+            UP=$(echo "$STATUS" | jsonfilter -e '@.up' 2>/dev/null || echo "false")
+            IP4=$(echo "$STATUS" | jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null || echo "")
+            IP6=$(echo "$STATUS" | jsonfilter -e '@["ipv6-address"][0].address' 2>/dev/null || echo "")
+            UPTIME=$(echo "$STATUS" | jsonfilter -e '@.uptime' 2>/dev/null || echo "0")
+            # 错误信息
+            LAST_ERR=""
+            [ -f "$PPPOE_STATE_DIR/$sec.error" ] && LAST_ERR=$(cat "$PPPOE_STATE_DIR/$sec.error" 2>/dev/null)
+            # IPv4/IPv6独立开关
+            IP4_EN=$(uci get network.$sec.yaxiang_ipv4 2>/dev/null || echo "1")
+            IP6_EN=$(uci get network.$sec.yaxiang_ipv6 2>/dev/null || echo "1")
+            [ $FIRST -eq 0 ] && RESULT="${RESULT},"
+            RESULT="${RESULT}{\"name\":\"${sec}\",\"device\":\"${DEVICE}\",\"username\":\"${USERNAME}\",\"has_password\":${HAS_PASS},\"description\":\"${DESC}\",\"mtu\":\"${MTU}\",\"up\":${UP},\"ipv4\":\"${IP4}\",\"ipv6\":\"${IP6}\",\"uptime\":${UPTIME},\"last_error\":\"${LAST_ERR}\",\"ipv4_enabled\":$([ \"$IP4_EN\" = \"1\" ] && echo true || echo false),\"ipv6_enabled\":$([ \"$IP6_EN\" = \"1\" ] && echo true || echo false)}"
+            FIRST=0
+          fi
+        done
+        RESULT="${RESULT}]"
+        json_ok "{\"interfaces\":${RESULT}}"
+        ;;
+
+      pppoe.add)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        DEVICE=$(echo "$input" | jsonfilter -e '@.device' 2>/dev/null | tr -cd 'a-zA-Z0-9._-')
+        USERNAME=$(echo "$input" | jsonfilter -e '@.username' 2>/dev/null | head -c 128)
+        PASSWORD=$(echo "$input" | jsonfilter -e '@.password' 2>/dev/null | head -c 128)
+        VID=$(echo "$input" | jsonfilter -e '@.vid' 2>/dev/null | tr -cd '0-9')
+        MTU=$(echo "$input" | jsonfilter -e '@.mtu' 2>/dev/null | tr -cd '0-9')
+        DESC=$(echo "$input" | jsonfilter -e '@.description' 2>/dev/null | head -c 128)
+        [ -z "$NAME" ] || [ -z "$DEVICE" ] || [ -z "$USERNAME" ] && { json_err "name, device, username required"; exit 0; }
+        uci get network.$NAME >/dev/null 2>&1 && { json_err "interface exists: $NAME"; exit 0; }
+        if [ -f "$NETCTL" ]; then
+          netctl_lock || { json_err "lock failed"; exit 0; }
+          netctl_backup network >/dev/null
+          uci set network.$NAME=interface
+          uci set network.$NAME.proto=pppoe
+          uci set network.$NAME.device="$DEVICE"
+          uci set network.$NAME.username="$USERNAME"
+          [ -n "$PASSWORD" ] && uci set network.$NAME.password="$PASSWORD"
+          uci set network.$NAME.mtu="${MTU:-1492}"
+          [ -n "$DESC" ] && uci set network.$NAME.description="$DESC"
+          uci set network.$NAME.keepalive="3 5"
+          uci set network.$NAME.yaxiang_ipv4=1
+          uci set network.$NAME.yaxiang_ipv6=1
+          uci commit network
+          netctl_unlock
+          netctl_log "PPPOE_ADD" "$NAME dev=$DEVICE user=$USERNAME"
+          json_ok "{\"name\":\"${NAME}\",\"action\":\"created\"}" true
+        else
+          json_err "netctl not available"
+        fi
+        ;;
+
+      pppoe.delete)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        [ -z "$NAME" ] && { json_err "name required"; exit 0; }
+        if [ -f "$NETCTL" ]; then
+          netctl_lock || { json_err "lock failed"; exit 0; }
+          netctl_backup network >/dev/null
+          ubus call network.interface.$NAME down 2>/dev/null
+          uci delete network.$NAME 2>/dev/null
+          uci commit network
+          rm -f "$PPPOE_STATE_DIR/$NAME.error" 2>/dev/null
+          netctl_unlock
+          netctl_log "PPPOE_DEL" "$NAME"
+          json_ok "{\"name\":\"${NAME}\",\"action\":\"deleted\"}" true
+        else
+          json_err "netctl not available"
+        fi
+        ;;
+
+      pppoe.batch_add)
+        read -r input
+        BASE=$(echo "$input" | jsonfilter -e '@.base_name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        DEVICE=$(echo "$input" | jsonfilter -e '@.device' 2>/dev/null | tr -cd 'a-zA-Z0-9._-')
+        USERNAME=$(echo "$input" | jsonfilter -e '@.username' 2>/dev/null | head -c 128)
+        PASSWORD=$(echo "$input" | jsonfilter -e '@.password' 2>/dev/null | head -c 128)
+        COUNT=$(echo "$input" | jsonfilter -e '@.count' 2>/dev/null | tr -cd '0-9')
+        VID=$(echo "$input" | jsonfilter -e '@.vid' 2>/dev/null | tr -cd '0-9')
+        [ -z "$BASE" ] || [ -z "$DEVICE" ] || [ -z "$USERNAME" ] || [ -z "$COUNT" ] && { json_err "base_name, device, username, count required"; exit 0; }
+        [ "$COUNT" -gt 32 ] && { json_err "max 32 instances"; exit 0; }
+        CREATED="["
+        FIRST=1
+        if [ -f "$NETCTL" ]; then
+          netctl_lock || { json_err "lock failed"; exit 0; }
+          netctl_backup network >/dev/null
+          i=1
+          while [ "$i" -le "$COUNT" ]; do
+            INAME="${BASE}_${i}"
+            if ! uci get network.$INAME >/dev/null 2>&1; then
+              uci set network.$INAME=interface
+              uci set network.$INAME.proto=pppoe
+              uci set network.$INAME.device="$DEVICE"
+              uci set network.$INAME.username="${USERNAME}${i}"
+              [ -n "$PASSWORD" ] && uci set network.$INAME.password="$PASSWORD"
+              uci set network.$INAME.mtu=1492
+              uci set network.$INAME.keepalive="3 5"
+              uci set network.$INAME.yaxiang_ipv4=1
+              uci set network.$INAME.yaxiang_ipv6=1
+              [ $FIRST -eq 0 ] && CREATED="${CREATED},"
+              CREATED="${CREATED}\"${INAME}\""
+              FIRST=0
+            fi
+            i=$((i + 1))
+          done
+          uci commit network
+          netctl_unlock
+          netctl_log "PPPOE_BATCH" "$BASE x$COUNT on $DEVICE"
+        fi
+        CREATED="${CREATED}]"
+        json_ok "{\"created\":${CREATED}}" true
+        ;;
+
+      pppoe.set_enabled)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        ENABLED=$(echo "$input" | jsonfilter -e '@.enabled' 2>/dev/null | tr -cd '01')
+        [ -z "$NAME" ] && { json_err "name required"; exit 0; }
+        if [ "$ENABLED" = "1" ]; then
+          ubus call network.interface.$NAME up 2>/dev/null || ifup "$NAME" 2>/dev/null
+          json_ok "{\"name\":\"${NAME}\",\"action\":\"up\"}" true
+        else
+          ubus call network.interface.$NAME down 2>/dev/null || ifdown "$NAME" 2>/dev/null
+          json_ok "{\"name\":\"${NAME}\",\"action\":\"down\"}" true
+        fi
+        ;;
+
+      pppoe.batch_set_enabled)
+        read -r input
+        NAMES=$(echo "$input" | jsonfilter -e '@.names' 2>/dev/null | tr -cd 'a-zA-Z0-9_,')
+        ENABLED=$(echo "$input" | jsonfilter -e '@.enabled' 2>/dev/null | tr -cd '01')
+        [ -z "$NAMES" ] && { json_err "names required"; exit 0; }
+        for n in $(echo "$NAMES" | tr ',' ' '); do
+          if [ "$ENABLED" = "1" ]; then
+            ubus call network.interface.$n up 2>/dev/null || ifup "$n" 2>/dev/null
+          else
+            ubus call network.interface.$n down 2>/dev/null || ifdown "$n" 2>/dev/null
+          fi
+        done
+        json_ok "{\"names\":\"${NAMES}\",\"action\":\"$([ \"$ENABLED\" = \"1\" ] && echo up || echo down)\"}" true
+        ;;
+
+      pppoe.reconnect)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        [ -z "$NAME" ] && { json_err "name required"; exit 0; }
+        ubus call network.interface.$NAME down 2>/dev/null
+        sleep 1
+        ubus call network.interface.$NAME up 2>/dev/null || ifup "$NAME" 2>/dev/null
+        json_ok "{\"name\":\"${NAME}\",\"action\":\"reconnect\"}" true
+        ;;
+
+      pppoe.status)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        [ -z "$NAME" ] && { json_err "name required"; exit 0; }
+        STATUS=$(ubus call network.interface.$NAME status 2>/dev/null)
+        if [ -n "$STATUS" ]; then
+          UP=$(echo "$STATUS" | jsonfilter -e '@.up' 2>/dev/null || echo "false")
+          IP4=$(echo "$STATUS" | jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null || echo "")
+          IP6=$(echo "$STATUS" | jsonfilter -e '@["ipv6-address"][0].address' 2>/dev/null || echo "")
+          GW=$(echo "$STATUS" | jsonfilter -e '@.route[0].nexthop' 2>/dev/null || echo "")
+          DNS=$(echo "$STATUS" | jsonfilter -e '@["dns-server"][0]' 2>/dev/null || echo "")
+          UPTIME=$(echo "$STATUS" | jsonfilter -e '@.uptime' 2>/dev/null || echo "0")
+          LAST_ERR=""
+          [ -f "$PPPOE_STATE_DIR/$NAME.error" ] && LAST_ERR=$(cat "$PPPOE_STATE_DIR/$NAME.error" 2>/dev/null)
+          json_ok "{\"name\":\"${NAME}\",\"up\":${UP},\"ipv4\":\"${IP4}\",\"ipv6\":\"${IP6}\",\"gateway\":\"${GW}\",\"dns\":\"${DNS}\",\"uptime\":${UPTIME},\"last_error\":\"${LAST_ERR}\"}"
+        else
+          json_err "interface not found"
+        fi
+        ;;
+
+      pppoe.status_all)
+        RESULT="["
+        FIRST=1
+        for sec in $(uci show network 2>/dev/null | grep "=interface" | cut -d. -f2 | cut -d= -f1); do
+          PROTO=$(uci get network.$sec.proto 2>/dev/null || echo "")
+          [ "$PROTO" = "pppoe" ] || continue
+          STATUS=$(ubus call network.interface.$sec status 2>/dev/null)
+          UP=$(echo "$STATUS" | jsonfilter -e '@.up' 2>/dev/null || echo "false")
+          IP4=$(echo "$STATUS" | jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null || echo "")
+          UPTIME=$(echo "$STATUS" | jsonfilter -e '@.uptime' 2>/dev/null || echo "0")
+          [ $FIRST -eq 0 ] && RESULT="${RESULT},"
+          RESULT="${RESULT}{\"name\":\"${sec}\",\"up\":${UP},\"ipv4\":\"${IP4}\",\"uptime\":${UPTIME}}"
+          FIRST=0
+        done
+        RESULT="${RESULT}]"
+        json_ok "{\"interfaces\":${RESULT}}"
+        ;;
+
+      *)
+        printf '{"success":false,"implemented":false,"source":"unavailable","data":null,"message":"该功能尚未接入真实系统"}\n'
+        ;;
+    esac
+  ;;
+esac

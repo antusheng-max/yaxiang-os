@@ -1,0 +1,38 @@
+#!/bin/sh
+# 亚象真实只读系统信息接口
+# 通过 ubus call rpcd_yaxiang_system <method> 调用
+
+. /lib/functions.sh
+
+case "$1" in
+    list)
+        echo '{"info":{"":{}},"network":{"":{}},"interfaces":{"":{}},"version":{"":{}}}'
+        ;;
+    call)
+        case "$2" in
+            info)
+                . /etc/openwrt_release
+                echo "{\"source\":\"real\",\"implemented\":true,\"hostname\":\"$(uci get system.@system[0].hostname 2>/dev/null || cat /proc/sys/kernel/hostname)\",\"model\":\"$(cat /tmp/sysinfo/model 2>/dev/null || echo 'x86_64')\",\"openwrt_version\":\"${OPENWRT_VERSION:-unknown}\",\"yaxiang_version\":\"V0.2-dev\",\"kernel\":\"$(uname -r)\",\"uptime\":\"$(cut -d' ' -f1 /proc/uptime)s\",\"loadavg\":\"$(cut -d' ' -f1-3 /proc/loadavg)\"}"
+                ;;
+            network)
+                echo "{\"source\":\"real\",\"implemented\":true,\"interfaces\":[$(ls /sys/class/net/ | grep -v lo | while read iface; do
+                    mac=$(cat /sys/class/net/$iface/address 2>/dev/null || echo "")
+                    carrier=$(cat /sys/class/net/$iface/carrier 2>/dev/null || echo "0")
+                    speed=$(cat /sys/class/net/$iface/speed 2>/dev/null || echo "unknown")
+                    ip4=$(ip -4 addr show dev $iface 2>/dev/null | grep -oP '(?<=inet )[^/]+' | head -1 || echo "")
+                    ip6=$(ip -6 addr show dev $iface 2>/dev/null | grep -oP '(?<=inet6 )[^/]+' | grep -v fe80 | head -1 || echo "")
+                    rx_bytes=$(cat /sys/class/net/$iface/statistics/rx_bytes 2>/dev/null || echo "0")
+                    tx_bytes=$(cat /sys/class/net/$iface/statistics/tx_bytes 2>/dev/null || echo "0")
+                    echo "{\"name\":\"$iface\",\"mac\":\"$mac\",\"carrier\":$([ $carrier = 1 ] && echo true || echo false),\"speed\":\"$speed\",\"ipv4\":\"$ip4\",\"ipv6\":\"$ip6\",\"rx_bytes\":$rx_bytes,\"tx_bytes\":$tx_bytes},"
+                done | sed 's/,$//')],\"default_route\":\"$(ip route show default 2>/dev/null | head -1 || echo '')\",\"dns\":[$(cat /etc/resolv.conf 2>/dev/null | grep nameserver | while read _ ns; do echo "\"$ns\","; done | sed 's/,$//')]}"
+                ;;
+            interfaces)
+                echo "{\"source\":\"real\",\"implemented\":true,\"lan\":{\"ip\":\"$(uci get network.lan.ipaddr 2>/dev/null || echo '192.168.1.1')\",\"netmask\":\"$(uci get network.lan.netmask 2>/dev/null || echo '255.255.255.0')\",\"proto\":\"$(uci get network.lan.proto 2>/dev/null || echo 'static')\"},\"wan\":{\"proto\":\"$(uci get network.wan.proto 2>/dev/null || echo 'dhcp')\"}}"
+                ;;
+            version)
+                . /etc/openwrt_release 2>/dev/null
+                echo "{\"source\":\"real\",\"implemented\":true,\"version\":\"V0.2-dev\",\"openwrt\":\"${DISTRIB_ID:-OpenWrt} ${DISTRIB_RELEASE:-unknown}\",\"build_date\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"target\":\"x86_64\"}"
+                ;;
+        esac
+        ;;
+esac

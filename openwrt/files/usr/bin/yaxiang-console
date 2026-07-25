@@ -1,0 +1,41 @@
+#!/bin/sh
+# 亚象系统控制台
+
+while true; do
+    clear
+    echo ""
+    echo "  ╔══════════════════════════════════════╗"
+    echo "  ║       亚象系统控制台 V0.2-dev       ║"
+    echo "  ╚══════════════════════════════════════╝"
+    echo ""
+    echo "  1. 查看系统和网络状态"
+    echo "  2. 设置管理网口"
+    echo "  3. 设置管理IP地址"
+    echo "  4. 重新识别和绑定网口"
+    echo "  5. 修改Web管理端口"
+    echo "  6. 重置管理员密码"
+    echo "  7. 测试网络连接"
+    echo "  8. 导入或恢复配置"
+    echo "  9. 恢复出厂设置"
+    echo " 10. 重启系统"
+    echo " 11. 关闭系统"
+    echo " 12. 进入维护终端"
+    echo ""
+    printf "请选择 [1-12]: "
+    read choice
+    case $choice in
+        1) echo ""; ip addr show; echo ""; uptime; echo ""; read -p "按Enter返回" ;;
+        2) echo ""; echo "可用网口:"; ls /sys/class/net/ | grep -v lo; printf "输入管理网口名称: "; read mgmt_if; uci set network.lan.ifname="$mgmt_if"; uci commit network; /etc/init.d/network restart; echo "已设置"; sleep 2 ;;
+        3) printf "输入管理IP地址: "; read mgmt_ip; uci set network.lan.ipaddr="$mgmt_ip"; uci commit network; /etc/init.d/network restart; echo "已设置"; sleep 2 ;;
+        4) echo ""; echo "重新扫描网口..."; /etc/init.d/network restart; sleep 3; echo "完成"; sleep 1 ;;
+        5) printf "输入Web端口 (默认80): "; read web_port; uci set uhttpd.main.listen_http="0.0.0.0:${web_port:-80}"; uci commit uhttpd; /etc/init.d/uhttpd restart; echo "已设置"; sleep 2 ;;
+        6) passwd; sleep 1 ;;
+        7) echo ""; ping -c 3 223.5.5.5 || echo "网络不通"; echo ""; read -p "按Enter返回" ;;
+        8) echo ""; echo "请将配置文件放到 /tmp/yaxiang-backup.tar.gz"; read -p "按Enter开始导入" ; tar xzf /tmp/yaxiang-backup.tar.gz -C / 2>/dev/null && echo "导入成功" || echo "导入失败"; sleep 2 ;;
+        9) echo ""; read -p "确认恢复出厂设置? (y/N): " confirm; [ "$confirm" = "y" ] && { firstboot -y && reboot; } ;;
+        10) echo "重启中..."; reboot ;;
+        11) echo "关机中..."; poweroff ;;
+        12) echo "进入维护终端，输入 exit 返回"; /bin/sh ;;
+        *) echo "无效选择"; sleep 1 ;;
+    esac
+done

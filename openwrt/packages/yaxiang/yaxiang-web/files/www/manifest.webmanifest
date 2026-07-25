@@ -1,0 +1,23 @@
+{
+  "name": "亚象网络操作系统",
+  "short_name": "亚象",
+  "description": "面向多宽带汇聚与双栈智能调度的网络操作系统",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f5f7fa",
+  "theme_color": "#1677ff",
+  "icons": [
+    {
+      "src": "/brand/yaxiang-logo-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/brand/yaxiang-logo-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

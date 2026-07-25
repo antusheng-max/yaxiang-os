@@ -1,0 +1,13 @@
+#!/bin/sh
+case "$1" in
+    list)
+        echo '{"status":{"":{}},"scores":{"":{}},"provincial":{"":{}}}'
+        ;;
+    call)
+        case "$2" in
+            status|scores|provincial)
+                echo '{"source":"unavailable","implemented":false,"reason":"尚未接入真实控制后端"}'
+                ;;
+        esac
+        ;;
+esac

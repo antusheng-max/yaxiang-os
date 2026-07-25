@@ -1,0 +1,116 @@
+#!/bin/sh
+# 亚象终端安装器 - 真实写盘安装
+
+DISKS=""
+DISK_COUNT=0
+
+echo ""
+echo "+--------------------------------------------------------------+"
+echo "|          亚象安装程序 V0.2-dev / YAXIANG OS INSTALLER       |"
+echo "+--------------------------------------------------------------+"
+echo "|  source: real  |  dryRun: false  |  realDiskAccess: true    |"
+echo "+--------------------------------------------------------------+"
+echo ""
+
+# 扫描硬盘
+echo "正在扫描存储设备..."
+echo ""
+
+# 获取当前启动设备
+BOOT_DEV=$(mount | grep " / " | grep -oP '/dev/\S+' | head -1 | sed 's/[0-9]*$//' | sed 's|/dev/||')
+echo "当前启动设备: /dev/$BOOT_DEV"
+echo ""
+
+DISK_LIST=""
+for dev in /sys/block/*; do
+    disk=$(basename $dev)
+    # 排除 loop, ram, sr, fd
+    case $disk in
+        loop*|ram*|sr*|fd*) continue ;;
+    esac
+    
+    # 排除当前启动设备
+    if [ "$disk" = "$BOOT_DEV" ]; then
+        echo "  [当前安装介质] /dev/$disk - 已排除"
+        continue
+    fi
+    
+    # 检查是否为块设备
+    if [ ! -b "/dev/$disk" ]; then
+        continue
+    fi
+    
+    model=$(cat /sys/block/$disk/device/model 2>/dev/null || echo "Unknown")
+    size=$(cat /sys/block/$disk/size 2>/dev/null || echo "0")
+    size_gb=$(echo "scale=1; $size / 2 / 1024 / 1024" | bc 2>/dev/null || echo "0")
+    serial=$(cat /sys/block/$disk/device/serial 2>/dev/null || echo "")
+    removable=$(cat /sys/block/$disk/removable 2>/dev/null || echo "0")
+    
+    if [ "$removable" = "1" ]; then
+        echo "  [可移动] /dev/$disk - 已排除"
+        continue
+    fi
+    
+    DISK_COUNT=$((DISK_COUNT + 1))
+    echo "  $DISK_COUNT. /dev/$disk  $model  ${size_gb}GB  $serial"
+    
+    DISK_LIST="$DISK_LIST
+$DISK_COUNT:$disk:$model:${size_gb}GB:$serial"
+done
+
+echo ""
+if [ $DISK_COUNT -eq 0 ]; then
+    echo "错误: 没有找到可用的目标硬盘"
+    exit 1
+fi
+
+echo "警告: 被选硬盘上的全部数据将被清除。"
+echo ""
+printf "请输入目标硬盘编号 [1-%d]: " $DISK_COUNT
+read disk_num
+
+TARGET_DISK=$(echo "$DISK_LIST" | grep "^$disk_num:" | cut -d: -f2)
+
+if [ -z "$TARGET_DISK" ]; then
+    echo "错误: 无效选择"
+    exit 1
+fi
+
+echo ""
+echo "你选择了: /dev/$TARGET_DISK"
+echo ""
+printf "确认清除并写入系统? (Y/N): "
+read confirm
+
+if [ "$confirm" != "Y" ] && [ "$confirm" != "y" ]; then
+    echo "已取消"
+    exit 0
+fi
+
+echo ""
+echo "正在写入亚象系统到 /dev/$TARGET_DISK ..."
+echo ""
+
+# 写入镜像 (使用 combined.img)
+IMG_FILE="/usr/share/yaxiang/yaxiang-system.img.gz"
+if [ -f "$IMG_FILE" ]; then
+    gzip -c -d "$IMG_FILE" | dd of="/dev/$TARGET_DISK" bs=4M conv=fsync 2>&1
+    sync
+    echo ""
+    echo "写盘完成，正在校验..."
+    # 简单校验
+    dd if="/dev/$TARGET_DISK" bs=512 count=1 2>/dev/null | od -A x -t x1 | head -3
+    echo ""
+    echo "校验完成"
+else
+    echo "错误: 系统镜像文件不存在: $IMG_FILE"
+    exit 1
+fi
+
+echo ""
+echo "+--------------------------------------------------------------+"
+echo "|              亚象系统安装完成                               |"
+echo "|  请移除安装介质 (U盘/光盘) 并按 Enter 重启系统              |"
+echo "+--------------------------------------------------------------+"
+read
+reboot

@@ -1,0 +1,105 @@
+#!/bin/sh
+# Yaxiang OS - Network API via rpcd/ubus
+# Read-only network information endpoints
+
+case "$1" in
+  list)
+    cat <<EOF
+{
+  "network.devices": {},
+  "network.interfaces": {},
+  "network.addresses": {},
+  "network.routes": {},
+  "network.dns": {},
+  "network.link_status": {},
+  "network.traffic_counters": {},
+  "lines.status": {}
+}
+EOF
+  ;;
+
+  call)
+    method="$2"
+    case "$method" in
+      network.devices)
+        # List network devices from ubus
+        ubus call network.device status 2>/dev/null || echo '{"devices":[]}'
+        ;;
+
+      network.interfaces)
+        # List network interfaces from ubus
+        ubus call network.interface dump 2>/dev/null || echo '{"interface":[]}'
+        ;;
+
+      network.addresses)
+        # IP addresses from ip command
+        ip -json address 2>/dev/null || echo '[]'
+        ;;
+
+      network.routes)
+        # Routing table from ip command
+        ip -json route 2>/dev/null || echo '[]'
+        ;;
+
+      network.dns)
+        # DNS configuration
+        DNS_SERVERS=$(grep "^nameserver" /tmp/resolv.conf.d/resolv.conf.auto 2>/dev/null | awk '{print $2}' | head -5 | tr '\n' ',' | sed 's/,$//')
+        echo "{\"dns_servers\":\"${DNS_SERVERS}\"}"
+        ;;
+
+      network.link_status)
+        # Link status for each interface
+        RESULT="["
+        FIRST=1
+        for iface in $(ls /sys/class/net/ 2>/dev/null | grep -v lo); do
+          CARRIER=$(cat /sys/class/net/$iface/carrier 2>/dev/null || echo "0")
+          SPEED=$(ethtool $iface 2>/dev/null | grep "Speed:" | awk '{print $2}' || echo "unknown")
+          DUPLEX=$(ethtool $iface 2>/dev/null | grep "Duplex:" | awk '{print $2}' || echo "unknown")
+          [ $FIRST -eq 0 ] && RESULT="${RESULT},"
+          RESULT="${RESULT}{\"interface\":\"${iface}\",\"carrier\":${CARRIER},\"speed\":\"${SPEED}\",\"duplex\":\"${DUPLEX}\"}"
+          FIRST=0
+        done
+        RESULT="${RESULT}]"
+        echo "{\"links\":${RESULT}}"
+        ;;
+
+      network.traffic_counters)
+        # Traffic counters from /proc/net/dev
+        RESULT="["
+        FIRST=1
+        while IFS=: read -r iface stats; do
+          iface=$(echo "$iface" | xargs)
+          [ "$iface" = "lo" ] && continue
+          [ -z "$iface" ] && continue
+          RX_BYTES=$(echo "$stats" | awk '{print $1}')
+          TX_BYTES=$(echo "$stats" | awk '{print $9}')
+          [ $FIRST -eq 0 ] && RESULT="${RESULT},"
+          RESULT="${RESULT}{\"interface\":\"${iface}\",\"rx_bytes\":${RX_BYTES},\"tx_bytes\":${TX_BYTES}}"
+          FIRST=0
+        done < /proc/net/dev 2>/dev/null
+        RESULT="${RESULT}]"
+        echo "{\"counters\":${RESULT}}"
+        ;;
+
+      lines.status)
+        # WAN line status
+        RESULT="["
+        FIRST=1
+        for iface in $(ubus call network.interface dump 2>/dev/null | jsonfilter -e '@.interface[@.device]'); do
+          DEV=$(echo "$iface" | jsonfilter -e '@.device' 2>/dev/null)
+          PROTO=$(echo "$iface" | jsonfilter -e '@.proto' 2>/dev/null)
+          UP=$(echo "$iface" | jsonfilter -e '@.up' 2>/dev/null)
+          [ $FIRST -eq 0 ] && RESULT="${RESULT},"
+          RESULT="${RESULT}{\"device\":\"${DEV}\",\"proto\":\"${PROTO}\",\"up\":${UP}}"
+          FIRST=0
+        done
+        RESULT="${RESULT}]"
+        echo "{\"lines\":${RESULT}}"
+        ;;
+
+      *)
+        echo "{\"implemented\":false,\"source\":\"unavailable\",\"reason\":\"未知方法: ${method}\"}"
+        ;;
+    esac
+  ;;
+esac

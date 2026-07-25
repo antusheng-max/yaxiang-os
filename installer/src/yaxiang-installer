@@ -1,0 +1,913 @@
+#!/bin/bash
+set -euo pipefail
+
+# ============================================================
+# 亚象网络操作系统安装器 - 第二阶段: 磁盘识别与安全确认
+# 版本: 0.2-dev (Stage 2)
+# 安全约束: 本脚本不包含任何写盘操作
+# ============================================================
+
+INSTALLER_VERSION="0.2-dev"
+INSTALLER_STAGE="3"
+
+# 全局数组: 扫描到的磁盘
+declare -a DISK_LIST=()
+declare -a DISK_HASHES=()
+
+# ============================================================
+# 工具函数
+# ============================================================
+
+show_banner() {
+    if [ -f /opt/yaxiang-installer/assets/banner.txt ]; then
+        cat /opt/yaxiang-installer/assets/banner.txt
+    else
+        echo "========================================"
+        echo "          亚象网络操作系统"
+        echo "        YAXIANG OS INSTALLER"
+        echo "              V${INSTALLER_VERSION}"
+        echo "========================================"
+    fi
+    echo ""
+}
+
+detect_boot_mode() {
+    if [ -d /sys/firmware/efi ]; then
+        echo "UEFI"
+    else
+        echo "Legacy BIOS"
+    fi
+}
+
+# 人类可读容量
+human_size() {
+    local bytes="$1"
+    if [ "$bytes" -ge 1099511627776 ]; then
+        echo "$(awk "BEGIN{printf \"%.1fT\", $bytes/1099511627776}")"
+    elif [ "$bytes" -ge 1073741824 ]; then
+        echo "$(awk "BEGIN{printf \"%.1fG\", $bytes/1073741824}")"
+    elif [ "$bytes" -ge 1048576 ]; then
+        echo "$(awk "BEGIN{printf \"%.1fM\", $bytes/1048576}")"
+    else
+        echo "${bytes}B"
+    fi
+}
+
+# ============================================================
+# 1. 磁盘扫描
+# ============================================================
+
+# 判断设备是否为当前 Live 根介质或安装介质
+is_live_or_install_media() {
+    local dev_name="$1"
+    local dev_path="/dev/${dev_name}"
+
+    # 检查 /proc/cmdline 中的 live-media 或 cdrom-detect 参数
+    if [ -f /proc/cmdline ]; then
+        local cmdline
+        cmdline=$(cat /proc/cmdline 2>/dev/null || true)
+        # live-media=/dev/sr0 或 cdrom-detect 相关
+        if echo "$cmdline" | grep -q "live-media=/dev/${dev_name}"; then
+            return 0
+        fi
+        if echo "$cmdline" | grep -q "cdrom-detect"; then
+            # 光驱设备已在 sr 排除中处理
+            :
+        fi
+    fi
+
+    # 检查当前根文件系统所在设备
+    local root_dev=""
+    if command -v findmnt >/dev/null 2>&1; then
+        root_dev=$(findmnt -n -o SOURCE / 2>/dev/null || true)
+    fi
+    if [ -z "$root_dev" ] && [ -f /proc/mounts ]; then
+        root_dev=$(awk '$2=="/" {print $1}' /proc/mounts 2>/dev/null | head -1 || true)
+    fi
+
+    if [ -n "$root_dev" ]; then
+        # 去除分区号，获取父磁盘
+        local root_disk=""
+        root_disk=$(echo "$root_dev" | sed -E 's|/dev/(sd[a-z]+)[0-9]*|\1|; s|/dev/(vd[a-z]+)[0-9]*|\1|; s|/dev/(xvd[a-z]+)[0-9]*|\1|; s|/dev/(nvme[0-9]+n[0-9]+)p[0-9]*|\1|; s|/dev/(mmcblk[0-9]+)p[0-9]*|\1|')
+        if [ "$root_disk" = "$dev_name" ] || [ "$root_dev" = "$dev_path" ]; then
+            return 0
+        fi
+        # 直接匹配设备路径
+        if [ "$root_dev" = "$dev_path" ]; then
+            return 0
+        fi
+    fi
+
+    # 检查 squashfs/overlay 挂载的源设备
+    if [ -f /proc/mounts ]; then
+        local squash_dev
+        squash_dev=$(awk '/squashfs|iso9660/ {print $1}' /proc/mounts 2>/dev/null | head -1 || true)
+        if [ -n "$squash_dev" ]; then
+            local sq_disk
+            sq_disk=$(echo "$squash_dev" | sed -E 's|/dev/(sd[a-z]+)[0-9]*|\1|; s|/dev/(vd[a-z]+)[0-9]*|\1|; s|/dev/(sr[0-9]+)|\1|')
+            if [ "$sq_disk" = "$dev_name" ]; then
+                return 0
+            fi
+        fi
+    fi
+
+    return 1
+}
+
+# 判断设备是否被 LVM/mdraid/device-mapper 占用
+is_device_occupied() {
+    local dev_name="$1"
+    local dev_path="/dev/${dev_name}"
+    local occupied="否"
+
+    # 检查 /proc/mdstat
+    if [ -f /proc/mdstat ]; then
+        if grep -q "$dev_name" /proc/mdstat 2>/dev/null; then
+            occupied="mdraid"
+        fi
+    fi
+
+    # 检查 device-mapper (LVM等)
+    if [ -d /sys/block/"$dev_name"/holders ]; then
+        local holders
+        holders=$(ls /sys/block/"$dev_name"/holders/ 2>/dev/null | head -1 || true)
+        if [ -n "$holders" ]; then
+            if echo "$holders" | grep -qi "lvm\|vg\|lv"; then
+                occupied="LVM"
+            elif echo "$holders" | grep -qi "md"; then
+                occupied="mdraid"
+            else
+                occupied="dm:${holders}"
+            fi
+        fi
+    fi
+
+    # 检查分区是否被占用
+    for part_dir in /sys/block/"$dev_name"/"${dev_name}"*; do
+        [ -d "$part_dir" ] || continue
+        local part_name
+        part_name=$(basename "$part_dir")
+        if [ -d "$part_dir/holders" ]; then
+            local part_holders
+            part_holders=$(ls "$part_dir/holders/" 2>/dev/null | head -1 || true)
+            if [ -n "$part_holders" ]; then
+                occupied="分区${part_name}被占用"
+                break
+            fi
+        fi
+    done
+
+    echo "$occupied"
+}
+
+# 扫描整块磁盘，结果存入 DISK_LIST 数组
+scan_whole_disks() {
+    DISK_LIST=()
+    DISK_HASHES=()
+
+    if [ ! -d /sys/block ]; then
+        echo "[错误] /sys/block 不存在，无法扫描磁盘" >&2
+        return 1
+    fi
+
+    for dev_dir in /sys/block/*; do
+        [ -d "$dev_dir" ] || continue
+        local dev_name
+        dev_name=$(basename "$dev_dir")
+
+        # --- 排除规则 ---
+
+        # 排除 loop 设备
+        case "$dev_name" in
+            loop*) continue ;;
+        esac
+
+        # 排除 sr 光驱
+        case "$dev_name" in
+            sr*) continue ;;
+        esac
+
+        # 排除 zram 设备
+        case "$dev_name" in
+            zram*) continue ;;
+        esac
+
+        # 排除 ram 设备
+        case "$dev_name" in
+            ram*) continue ;;
+        esac
+
+        # 排除 device-mapper 内部设备 (dm-*)
+        case "$dev_name" in
+            dm-*) continue ;;
+        esac
+
+        # 排除 nbd 设备 (网络块设备，非物理磁盘)
+        case "$dev_name" in
+            nbd*) continue ;;
+        esac
+
+        # 只接受已知磁盘类型
+        local is_known_disk=0
+        case "$dev_name" in
+            sd[a-z]*)    is_known_disk=1 ;;  # SATA/SCSI/USB
+            vd[a-z]*)    is_known_disk=1 ;;  # VirtIO
+            xvd[a-z]*)   is_known_disk=1 ;;  # Xen
+            nvme[0-9]*n[0-9]*) is_known_disk=1 ;;  # NVMe
+            mmcblk[0-9]*) is_known_disk=1 ;;  # MMC/SD
+            md[0-9]*)    is_known_disk=1 ;;  # Linux RAID
+        esac
+        if [ "$is_known_disk" -eq 0 ]; then
+            continue
+        fi
+
+        # 排除分区 (sys/block 下不应有分区，但双重检查)
+        if [ -f "$dev_dir/partition" ]; then
+            continue
+        fi
+
+        # 排除只读设备
+        local ro_val
+        ro_val=$(cat "$dev_dir/ro" 2>/dev/null || echo "0")
+        if [ "$ro_val" = "1" ]; then
+            continue
+        fi
+
+        # 排除容量为 0 的设备
+        local size_sectors
+        size_sectors=$(cat "$dev_dir/size" 2>/dev/null || echo "0")
+        if [ "$size_sectors" = "0" ]; then
+            continue
+        fi
+
+        # 排除当前 Live 根介质和安装介质
+        if is_live_or_install_media "$dev_name"; then
+            continue
+        fi
+
+        # 通过所有排除规则，加入列表
+        DISK_LIST+=("$dev_name")
+    done
+
+    # 排序
+    if [ ${#DISK_LIST[@]} -gt 0 ]; then
+        IFS=$'\n' DISK_LIST=($(sort <<<"${DISK_LIST[*]}")); unset IFS
+    fi
+
+    # 计算每个磁盘的身份哈希
+    for dev_name in "${DISK_LIST[@]}"; do
+        local hash
+        hash=$(compute_identity_hash "$dev_name")
+        DISK_HASHES+=("$hash")
+    done
+}
+
+# ============================================================
+# 2. 磁盘信息采集
+# ============================================================
+
+compute_identity_hash() {
+    local dev_name="$1"
+    local dev_dir="/sys/block/${dev_name}"
+
+    local dev_path="/dev/${dev_name}"
+    local major_minor
+    major_minor=$(cat "$dev_dir/dev" 2>/dev/null || echo "0:0")
+    local serial
+    serial=$(get_disk_serial "$dev_name")
+    local size_sectors
+    size_sectors=$(cat "$dev_dir/size" 2>/dev/null || echo "0")
+    local model
+    model=$(get_disk_model "$dev_name")
+
+    # 身份哈希 = sha256(路径+major:minor+序列号+容量+型号)
+    local identity_string="${dev_path}|${major_minor}|${serial}|${size_sectors}|${model}"
+    echo -n "$identity_string" | sha256sum | awk '{print $1}'
+}
+
+get_disk_model() {
+    local dev_name="$1"
+    local model=""
+
+    # 尝试 sysfs
+    if [ -f "/sys/block/${dev_name}/device/model" ]; then
+        model=$(cat "/sys/block/${dev_name}/device/model" 2>/dev/null | sed 's/[[:space:]]*$//' || true)
+    fi
+
+    # NVMe 特殊路径
+    if [ -z "$model" ] && [ -f "/sys/block/${dev_name}/device/subsysnqn" ]; then
+        model=$(cat "/sys/block/${dev_name}/device/model" 2>/dev/null | sed 's/[[:space:]]*$//' || true)
+    fi
+
+    # 尝试 udevadm
+    if [ -z "$model" ] && command -v udevadm >/dev/null 2>&1; then
+        model=$(udevadm info --query=property --name="/dev/${dev_name}" 2>/dev/null | grep "^ID_MODEL=" | cut -d= -f2 || true)
+    fi
+
+    # md RAID 特殊处理
+    if [ -z "$model" ]; then
+        case "$dev_name" in
+            md*) model="Linux Software RAID" ;;
+        esac
+    fi
+
+    echo "${model:-未知}"
+}
+
+get_disk_serial() {
+    local dev_name="$1"
+    local serial=""
+
+    # 尝试 sysfs
+    if [ -f "/sys/block/${dev_name}/device/serial" ]; then
+        serial=$(cat "/sys/block/${dev_name}/device/serial" 2>/dev/null | sed 's/[[:space:]]*$//' || true)
+    fi
+
+    # 尝试 udevadm ID_SERIAL_SHORT
+    if [ -z "$serial" ] && command -v udevadm >/dev/null 2>&1; then
+        serial=$(udevadm info --query=property --name="/dev/${dev_name}" 2>/dev/null | grep "^ID_SERIAL_SHORT=" | cut -d= -f2 || true)
+    fi
+
+    # 尝试 udevadm ID_SERIAL
+    if [ -z "$serial" ] && command -v udevadm >/dev/null 2>&1; then
+        serial=$(udevadm info --query=property --name="/dev/${dev_name}" 2>/dev/null | grep "^ID_SERIAL=" | cut -d= -f2 || true)
+    fi
+
+    echo "${serial:-无}"
+}
+
+get_disk_transport() {
+    local dev_name="$1"
+    local transport=""
+
+    # 根据设备名称前缀推断
+    case "$dev_name" in
+        sd*)
+            # 尝试读取驱动
+            local driver_link="/sys/block/${dev_name}/device/../driver"
+            if [ -L "$driver_link" ]; then
+                transport=$(basename "$(readlink -f "$driver_link" 2>/dev/null)" 2>/dev/null || true)
+            fi
+            if [ -z "$transport" ]; then
+                # 尝试 udevadm ID_BUS
+                if command -v udevadm >/dev/null 2>&1; then
+                    transport=$(udevadm info --query=property --name="/dev/${dev_name}" 2>/dev/null | grep "^ID_BUS=" | cut -d= -f2 || true)
+                fi
+            fi
+            transport="${transport:-sata/scsi}"
+            ;;
+        vd*)   transport="virtio" ;;
+        xvd*)  transport="xen" ;;
+        nvme*) transport="nvme" ;;
+        mmcblk*) transport="mmc" ;;
+        md*)   transport="raid" ;;
+        *)     transport="未知" ;;
+    esac
+
+    echo "$transport"
+}
+
+get_disk_filesystem() {
+    local dev_name="$1"
+    local fs=""
+
+    # 检查整盘文件系统
+    if command -v blkid >/dev/null 2>&1; then
+        fs=$(blkid -o value -s TYPE "/dev/${dev_name}" 2>/dev/null || true)
+    fi
+
+    # 如果整盘无文件系统，检查第一个分区
+    if [ -z "$fs" ]; then
+        local first_part=""
+        case "$dev_name" in
+            nvme*|mmcblk*)
+                first_part="/dev/${dev_name}p1"
+                ;;
+            *)
+                first_part="/dev/${dev_name}1"
+                ;;
+        esac
+        if [ -b "$first_part" ] && command -v blkid >/dev/null 2>&1; then
+            fs=$(blkid -o value -s TYPE "$first_part" 2>/dev/null || true)
+        fi
+    fi
+
+    echo "${fs:-无}"
+}
+
+get_disk_mountpoint() {
+    local dev_name="$1"
+    local mnt=""
+
+    if command -v findmnt >/dev/null 2>&1; then
+        # 检查整盘
+        mnt=$(findmnt -n -o TARGET "/dev/${dev_name}" 2>/dev/null | head -1 || true)
+        # 检查分区
+        if [ -z "$mnt" ]; then
+            mnt=$(findmnt -n -o TARGET -S "/dev/${dev_name}" 2>/dev/null | head -1 || true)
+        fi
+    fi
+
+    if [ -z "$mnt" ] && [ -f /proc/mounts ]; then
+        mnt=$(awk -v dev="/dev/${dev_name}" '$1 ~ dev {print $2}' /proc/mounts 2>/dev/null | head -1 || true)
+    fi
+
+    echo "${mnt:-未挂载}"
+}
+
+get_disk_partition_count() {
+    local dev_name="$1"
+    local count=0
+
+    for part_dir in /sys/block/"$dev_name"/; do
+        [ -d "$part_dir" ] || continue
+        local entry
+        for entry in /sys/block/"$dev_name"/*; do
+            [ -d "$entry" ] || continue
+            local entry_name
+            entry_name=$(basename "$entry")
+            # 分区名以磁盘名开头且含数字
+            case "$dev_name" in
+                nvme*|mmcblk*)
+                    # nvme0n1p1, mmcblk0p1
+                    if echo "$entry_name" | grep -q "^${dev_name}p[0-9]"; then
+                        count=$((count + 1))
+                    fi
+                    ;;
+                *)
+                    # sda1, vda1
+                    if echo "$entry_name" | grep -q "^${dev_name}[0-9]"; then
+                        count=$((count + 1))
+                    fi
+                    ;;
+            esac
+        done
+        break  # 只遍历一次目录
+    done
+
+    echo "$count"
+}
+
+# 获取完整磁盘信息并格式化输出
+get_disk_info() {
+    local dev_name="$1"
+    local dev_dir="/sys/block/${dev_name}"
+    local dev_path="/dev/${dev_name}"
+
+    local major_minor
+    major_minor=$(cat "$dev_dir/dev" 2>/dev/null || echo "0:0")
+
+    local size_sectors
+    size_sectors=$(cat "$dev_dir/size" 2>/dev/null || echo "0")
+    local size_bytes=$((size_sectors * 512))
+    local size_human
+    size_human=$(human_size "$size_bytes")
+
+    local model
+    model=$(get_disk_model "$dev_name")
+
+    local serial
+    serial=$(get_disk_serial "$dev_name")
+
+    local transport
+    transport=$(get_disk_transport "$dev_name")
+
+    local ro_val
+    ro_val=$(cat "$dev_dir/ro" 2>/dev/null || echo "0")
+    local ro_status="可写"
+    [ "$ro_val" = "1" ] && ro_status="只读"
+
+    local part_count
+    part_count=$(get_disk_partition_count "$dev_name")
+
+    local filesystem
+    filesystem=$(get_disk_filesystem "$dev_name")
+
+    local mountpoint
+    mountpoint=$(get_disk_mountpoint "$dev_name")
+
+    local occupied
+    occupied=$(is_device_occupied "$dev_name")
+
+    local identity_hash
+    identity_hash=$(compute_identity_hash "$dev_name")
+
+    # 输出格式化信息
+    echo "  设备路径:     $dev_path"
+    echo "  Major:Minor:  $major_minor"
+    echo "  型号:         $model"
+    echo "  容量:         $size_human ($size_bytes 字节)"
+    echo "  序列号:       $serial"
+    echo "  传输类型:     $transport"
+    echo "  只读状态:     $ro_status"
+    echo "  分区数量:     $part_count"
+    echo "  文件系统:     $filesystem"
+    echo "  挂载点:       $mountpoint"
+    echo "  占用状态:     $occupied"
+    echo "  身份哈希:     ${identity_hash:0:16}..."
+}
+
+# ============================================================
+# 3. 磁盘展示
+# ============================================================
+
+display_disk_table() {
+    echo ""
+    echo "========================================"
+    echo "  磁盘扫描结果 (共 ${#DISK_LIST[@]} 块可用磁盘)"
+    echo "========================================"
+    echo ""
+
+    if [ ${#DISK_LIST[@]} -eq 0 ]; then
+        echo "  [警告] 未检测到可安装的磁盘设备。"
+        echo ""
+        echo "  已排除的设备类型:"
+        echo "    - 分区、loop、sr光驱、zram、ramdisk"
+        echo "    - device-mapper 内部设备"
+        echo "    - 只读设备、容量为0的设备"
+        echo "    - 当前 Live 根介质和安装介质"
+        echo ""
+        return
+    fi
+
+    printf "  %-4s %-12s %-8s %-20s %-8s %-4s %-8s\n" \
+        "编号" "设备" "容量" "型号" "传输" "分区" "占用"
+    echo "  ------------------------------------------------------------------------"
+
+    local idx=1
+    for dev_name in "${DISK_LIST[@]}"; do
+        local dev_dir="/sys/block/${dev_name}"
+        local size_sectors
+        size_sectors=$(cat "$dev_dir/size" 2>/dev/null || echo "0")
+        local size_bytes=$((size_sectors * 512))
+        local size_human
+        size_human=$(human_size "$size_bytes")
+
+        local model
+        model=$(get_disk_model "$dev_name")
+        # 截断过长型号
+        if [ ${#model} -gt 18 ]; then
+            model="${model:0:17}~"
+        fi
+
+        local transport
+        transport=$(get_disk_transport "$dev_name")
+
+        local part_count
+        part_count=$(get_disk_partition_count "$dev_name")
+
+        local occupied
+        occupied=$(is_device_occupied "$dev_name")
+        local occ_short="否"
+        [ "$occupied" != "否" ] && occ_short="是"
+
+        printf "  %-4s %-12s %-8s %-20s %-8s %-4s %-8s\n" \
+            "[$idx]" "/dev/${dev_name}" "$size_human" "$model" "$transport" "$part_count" "$occ_short"
+
+        idx=$((idx + 1))
+    done
+
+    echo ""
+}
+
+# ============================================================
+# 4. 选择与双重确认
+# ============================================================
+
+select_and_confirm_disk() {
+    if [ ${#DISK_LIST[@]} -eq 0 ]; then
+        echo "[错误] 没有可选磁盘，无法继续。"
+        return 1
+    fi
+
+    echo ""
+    echo "----------------------------------------"
+    echo "  磁盘选择与身份确认"
+    echo "----------------------------------------"
+    echo ""
+
+    # 步骤1: 输入编号选择磁盘
+    local choice=""
+    read -p "请输入目标磁盘编号 [1-${#DISK_LIST[@]}]: " choice || true
+
+    # 验证编号
+    if ! echo "$choice" | grep -qE '^[0-9]+$'; then
+        echo "[错误] 无效输入，请输入数字编号。"
+        return 1
+    fi
+
+    if [ "$choice" -lt 1 ] || [ "$choice" -gt ${#DISK_LIST[@]} ]; then
+        echo "[错误] 编号超出范围 [1-${#DISK_LIST[@]}]。"
+        return 1
+    fi
+
+    local idx=$((choice - 1))
+    local selected_disk="${DISK_LIST[$idx]}"
+    local selected_hash="${DISK_HASHES[$idx]}"
+
+    echo ""
+    echo "您选择的磁盘:"
+    echo ""
+    get_disk_info "$selected_disk"
+    echo ""
+
+    # 步骤2: 第一次确认 - 大写 Y
+    echo "========================================"
+    echo "  [第一次确认]"
+    echo "  您即将选定 /dev/${selected_disk} 作为安装目标。"
+    echo "  此操作在当前阶段不会写入任何数据。"
+    echo ""
+    echo "  请输入大写 Y 确认 (区分大小写):"
+    echo "========================================"
+    local confirm1=""
+    read -p "> " confirm1 || true
+
+    if [ "$confirm1" != "Y" ]; then
+        echo ""
+        echo "[取消] 确认失败: 需要输入大写 Y，实际输入为 '${confirm1}'。"
+        echo "操作已取消。"
+        return 1
+    fi
+
+    echo ""
+    echo "[通过] 第一次确认成功。"
+    echo ""
+
+    # 步骤3: 第二次确认 - 重新输入编号
+    echo "========================================"
+    echo "  [第二次确认]"
+    echo "  请再次输入磁盘编号以确认选择: /dev/${selected_disk}"
+    echo "========================================"
+    local confirm2=""
+    read -p "> " confirm2 || true
+
+    if [ "$confirm2" != "$choice" ]; then
+        echo ""
+        echo "[取消] 确认失败: 编号不匹配 (期望 '${choice}'，实际 '${confirm2}')。"
+        echo "操作已取消。"
+        return 1
+    fi
+
+    echo ""
+    echo "[通过] 第二次确认成功。"
+    echo ""
+
+    # 步骤4: 重新扫描并核对设备身份
+    echo "正在重新扫描磁盘以核对设备身份..."
+    echo ""
+
+    # 保存旧哈希
+    local old_hash="$selected_hash"
+
+    # 重新扫描
+    scan_whole_disks
+
+    # 查找重新扫描后的同一磁盘
+    local new_hash=""
+    local found=0
+    local i=0
+    for dev_name in "${DISK_LIST[@]}"; do
+        if [ "$dev_name" = "$selected_disk" ]; then
+            new_hash="${DISK_HASHES[$i]}"
+            found=1
+            break
+        fi
+        i=$((i + 1))
+    done
+
+    if [ "$found" -eq 0 ]; then
+        echo ""
+        echo "[错误] 重新扫描后磁盘 /dev/${selected_disk} 已消失！"
+        echo "设备身份核对失败，操作中止。"
+        return 1
+    fi
+
+    if [ "$old_hash" != "$new_hash" ]; then
+        echo ""
+        echo "[错误] 设备身份哈希不一致！"
+        echo "  确认前: ${old_hash:0:16}..."
+        echo "  确认后: ${new_hash:0:16}..."
+        echo "磁盘可能在确认期间发生变化，操作中止。"
+        return 1
+    fi
+
+    # 全部通过
+    echo "========================================"
+    echo ""
+    echo "目标磁盘身份确认通过。"
+    echo "即将开始写入亚象网络操作系统。"
+    echo ""
+    echo "========================================"
+    echo ""
+    echo "  已确认磁盘: /dev/${selected_disk}"
+    echo "  身份哈希:   ${new_hash:0:32}..."
+    echo ""
+
+    # INSTALL 最终确认
+    echo "输入 INSTALL 开始写入："
+    echo "输入其他内容取消："
+    local install_confirm=""
+    read -p "> " install_confirm || true
+
+    if [ "$install_confirm" != "INSTALL" ]; then
+        echo ""
+        echo "[取消] 未输入 INSTALL，写入已取消。"
+        return 0
+    fi
+
+    echo ""
+    echo "[确认] 开始写入流程..."
+    echo ""
+
+    # 调用 image-writer.sh
+    local writer_script
+    writer_script="$(dirname "$0")/image-writer.sh"
+    if [ ! -f "$writer_script" ]; then
+        writer_script="/opt/yaxiang-installer/image-writer.sh"
+    fi
+
+    if [ ! -f "$writer_script" ]; then
+        echo "[错误] 写入脚本不存在: $writer_script"
+        return 1
+    fi
+
+    local boot_mode
+    boot_mode=$(detect_boot_mode)
+    local writer_rc=0
+    bash "$writer_script" \
+        --target "/dev/${selected_disk}" \
+        --hash "$new_hash" \
+        --boot-mode "$boot_mode" || writer_rc=$?
+
+    if [ "$writer_rc" -ne 0 ]; then
+        echo ""
+        echo "[失败] 写入过程出错 (退出码: $writer_rc)"
+        echo "请勿从目标磁盘启动。"
+        return 1
+    fi
+
+    return 0
+}
+
+# ============================================================
+# 5. 主菜单
+# ============================================================
+
+show_menu() {
+    local boot_mode="$1"
+    echo "当前启动模式: ${boot_mode}"
+    echo "Live 系统版本: V${INSTALLER_VERSION} (Stage ${INSTALLER_STAGE})"
+    echo "检测到的可用磁盘: ${#DISK_LIST[@]} 块"
+    echo ""
+    echo "----------------------------------------"
+    echo "  1) 磁盘识别与系统安装 (第二+三阶段)"
+    echo "  2) 重新扫描磁盘"
+    echo "  3) 查看磁盘详细信息"
+    echo "  4) 进入维护终端"
+    echo "  5) 重启"
+    echo "  6) 关机"
+    echo "----------------------------------------"
+    echo ""
+}
+
+view_disk_details() {
+    if [ ${#DISK_LIST[@]} -eq 0 ]; then
+        echo "[提示] 没有检测到磁盘。"
+        read -p "按 Enter 返回菜单..." _
+        return
+    fi
+
+    display_disk_table
+
+    local choice=""
+    read -p "输入编号查看详情 [1-${#DISK_LIST[@]}] (直接回车返回): " choice
+    if [ -z "$choice" ]; then
+        return
+    fi
+
+    if echo "$choice" | grep -qE '^[0-9]+$' && [ "$choice" -ge 1 ] && [ "$choice" -le ${#DISK_LIST[@]} ]; then
+        local idx=$((choice - 1))
+        echo ""
+        echo "=== /dev/${DISK_LIST[$idx]} 详细信息 ==="
+        echo ""
+        get_disk_info "${DISK_LIST[$idx]}"
+        echo ""
+    else
+        echo "[错误] 无效编号。"
+    fi
+
+    read -p "按 Enter 返回菜单..." _
+}
+
+maintenance_shell() {
+    echo ""
+    echo "进入维护终端。输入 exit 返回安装程序。"
+    echo "可用工具: lsblk, blkid, findmnt, udevadm"
+    echo ""
+    /bin/bash --norc --noprofile -i 2>/dev/null || /bin/sh
+}
+
+main() {
+    clear 2>/dev/null || true
+    show_banner
+
+    local boot_mode
+    boot_mode=$(detect_boot_mode)
+
+    # 初始扫描
+    scan_whole_disks
+
+    while true; do
+        show_menu "$boot_mode"
+        local choice=""
+        read -p "请选择 [1-6]: " choice
+        case "$choice" in
+            1)
+                display_disk_table
+                select_and_confirm_disk || true
+                read -p "按 Enter 返回菜单..." _
+                ;;
+            2)
+                echo "正在重新扫描磁盘..."
+                scan_whole_disks
+                display_disk_table
+                read -p "按 Enter 返回菜单..." _
+                ;;
+            3)
+                view_disk_details
+                ;;
+            4)
+                maintenance_shell
+                ;;
+            5)
+                echo "正在重启..."
+                reboot 2>/dev/null || true
+                exit 0
+                ;;
+            6)
+                echo "正在关机..."
+                poweroff 2>/dev/null || true
+                exit 0
+                ;;
+            *)
+                echo "无效选择，请重试。"
+                ;;
+        esac
+    done
+}
+
+# 支持非交互模式 (用于自动化测试)
+if [ "${1:-}" = "--scan-only" ]; then
+    scan_whole_disks
+    display_disk_table
+    for dev_name in "${DISK_LIST[@]}"; do
+        echo "=== /dev/${dev_name} ==="
+        get_disk_info "$dev_name"
+        echo ""
+    done
+    exit 0
+fi
+
+if [ "${1:-}" = "--auto-confirm" ]; then
+    # 自动化测试模式: 扫描 + 自动选择第一块磁盘 + 确认
+    scan_whole_disks
+    display_disk_table
+    if [ ${#DISK_LIST[@]} -gt 0 ]; then
+        echo "1" | { echo "Y"; echo "1"; } | select_and_confirm_disk
+    else
+        echo "[测试] 无磁盘可选"
+        exit 1
+    fi
+    exit 0
+fi
+
+if [ "${1:-}" = "--interactive-test" ]; then
+    # 交互测试模式: 从 stdin 读取用户输入进行确认流程
+    scan_whole_disks
+    display_disk_table
+    if [ ${#DISK_LIST[@]} -gt 0 ]; then
+        rc=0
+        select_and_confirm_disk || rc=$?
+        exit $rc
+    else
+        echo "[测试] 无磁盘可选"
+        exit 1
+    fi
+fi
+
+if [ "${1:-}" = "--write-test" ]; then
+    # 写入测试模式: 扫描 + 确认 + INSTALL + 写入
+    export YAXIANG_INSTALLER_TEST_MODE=1
+    scan_whole_disks
+    display_disk_table
+    if [ ${#DISK_LIST[@]} -gt 0 ]; then
+        rc=0
+        select_and_confirm_disk || rc=$?
+        exit $rc
+    else
+        echo "[测试] 无磁盘可选"
+        exit 1
+    fi
+fi
+
+main "$@"

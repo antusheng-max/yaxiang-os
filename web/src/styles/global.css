@@ -1,0 +1,116 @@
+:root {
+  --lh-primary: #1677ff;
+  --lh-primary-light: #e6f4ff;
+  --lh-bg: #f5f7fa;
+  --lh-border: #e4e7ed;
+  --lh-text: #303133;
+  --lh-text-secondary: #606266;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root,
+#app {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  background: var(--lh-bg);
+  color: var(--lh-text);
+  font-size: 14px;
+}
+
+.el-menu {
+  border-right: none;
+}
+
+.standard-table .el-table th.el-table__cell {
+  background: #f0f5ff;
+  color: var(--lh-text);
+  font-weight: 600;
+}
+
+.el-card {
+  border: 1px solid var(--lh-border);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+
+.layout,
+.layout > *,
+.main-area,
+.main-area > *,
+.el-row,
+.el-row > *,
+.el-card,
+.el-card__header,
+.el-card__body,
+.el-form,
+.el-form-item,
+.el-form-item__content {
+  min-width: 0;
+}
+
+.el-row {
+  flex-wrap: wrap;
+}
+
+.el-button {
+  height: var(--layout-button-height);
+  min-height: var(--layout-button-height);
+}
+
+.el-card__body {
+  overflow: visible;
+}
+
+.legacy-section-wrapper {
+  display: contents;
+}
+
+.page-container > .toolbar,
+.page-container > .header-actions,
+.page-container > .page-actions {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--layout-toolbar-height);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 var(--layout-section-gap);
+}
+
+@media (max-width: 768px) {
+  .el-col-6, .el-col-8, .el-col-12 {
+    max-width: 100%;
+    flex: 0 0 100%;
+  }
+  .el-col-6, .el-col-8 { margin-bottom: var(--layout-section-gap); }
+  .el-descriptions { overflow-x: auto; }
+  .el-descriptions__body { min-width: 480px; }
+  .el-form--inline .el-form-item { display: block; margin-right: 0; }
+  .el-form--inline .el-form-item__content { width: 100%; }
+  .el-form--inline .el-input, .el-form--inline .el-select { width: 100%; }
+  .session-form-row { flex-wrap: wrap; }
+  .session-form-row .el-input, .session-form-row .el-input-number { width: 100%; }
+  .wan-card-header { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .el-dialog { --el-dialog-margin-top: 0; }
+  .el-message-box { width: 90%; }
+}

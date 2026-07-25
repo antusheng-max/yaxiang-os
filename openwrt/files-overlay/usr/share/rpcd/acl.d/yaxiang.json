@@ -1,0 +1,30 @@
+{
+  "yaxiang": {
+    "description": "Yaxiang OS API access",
+    "read": {
+      "ubus": {
+        "yaxiang_system": [
+          "system.info",
+          "system.version",
+          "system.resources",
+          "system.services"
+        ],
+        "yaxiang_network": [
+          "network.devices",
+          "network.interfaces",
+          "network.addresses",
+          "network.routes",
+          "network.dns",
+          "network.link_status",
+          "network.traffic_counters",
+          "lines.status"
+        ]
+      },
+      "uci": [ "system", "network", "dhcp", "firewall" ]
+    },
+    "write": {
+      "ubus": {},
+      "uci": {}
+    }
+  }
+}

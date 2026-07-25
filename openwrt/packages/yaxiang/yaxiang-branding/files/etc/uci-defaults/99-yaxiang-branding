@@ -1,0 +1,36 @@
+#!/bin/sh
+# Yaxiang OS Branding - First Boot Configuration
+# This script runs once on first boot to set up branding
+
+set -e
+
+# Source release info
+. /etc/yaxiang-release
+
+# Update os-release with Yaxiang branding (append, don't replace OpenWrt base)
+cat >> /etc/os-release << OSEOF
+
+# Yaxiang OS Branding
+YAXIANG_NAME="${PRODUCT_NAME}"
+YAXIANG_SHORT_NAME="${PRODUCT_SHORT_NAME}"
+YAXIANG_ENGLISH_NAME="${PRODUCT_ENGLISH_NAME}"
+YAXIANG_VERSION="${PRODUCT_VERSION}"
+YAXIANG_BUILD_ID="${BUILD_ID}"
+YAXIANG_BUILD_DATE="${BUILD_DATE}"
+OSEOF
+
+# Set console welcome message
+cat > /etc/banner << BANNER
+
+ ╔══════════════════════════════════════╗
+ ║     亚象网络操作系统 Yaxiang OS      ║
+ ║         Version: ${PRODUCT_VERSION}           ║
+       OpenWrt ${OPENWRT_VERSION}              ║
+ ╚══════════════════════════════════════╝
+
+BANNER
+
+# Mark as done
+touch /etc/yaxiang-branding-applied
+
+exit 0

@@ -1,0 +1,82 @@
+# ============================================
+# 亚象网络操作系统 (Yaxiang OS) .gitignore
+# ============================================
+
+# 本地配置和密钥
+AGENTS.local.md
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+credentials*
+secrets*
+*token*
+*.secret
+
+# Node和前端构建
+node_modules/
+web/node_modules/
+web/dist/
+*.map
+
+# OpenWrt大型构建产物
+openwrt/output/
+openwrt/build_dir/
+openwrt/staging_dir/
+openwrt/bin/
+openwrt/dl/
+openwrt/tmp/
+openwrt/logs/
+
+# 安装器构建产物
+installer/output/
+installer/**/stage*-work/
+installer/**/*.iso
+installer/**/*.img
+installer/**/*.img.gz
+installer/**/*.qcow2
+installer/**/*.raw
+installer/**/*.vdi
+installer/**/*.vmdk
+
+# 安装器Live环境大型文件
+installer/live-rootfs/
+installer/images/
+
+# 发布附件
+release/
+*.iso
+*.img
+*.img.gz
+*.qcow2
+*.raw
+*.vdi
+*.vmdk
+*.zip
+
+# 临时文件
+*.log
+*.tmp
+*.swp
+*~
+.DS_Store
+Thumbs.db
+__pycache__/
+.pytest_cache/
+.cache/
+
+# 编辑器和IDE
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Live环境根文件系统（构建产物）
+installer/live/rootfs/

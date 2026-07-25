@@ -1,0 +1,565 @@
+#!/bin/sh
+# ============================================================
+# Yaxiang OS - LAN/WAN Configuration API via rpcd/ubus
+# 第六阶段B: LAN/WAN真实配置
+# 所有写操作通过 netctl.sh 控制底座
+# ============================================================
+
+NETCTL="/usr/lib/yaxiang/netctl.sh"
+[ -f "$NETCTL" ] && . "$NETCTL"
+
+json_ok() { printf '{"success":true,"implemented":true,"source":"uci","data":%s,"message":"","changed":%s}\n' "$1" "${2:-false}"; }
+json_err() { printf '{"success":false,"implemented":true,"source":"uci","data":null,"message":"%s"}\n' "$1"; }
+json_ni() { printf '{"success":false,"implemented":false,"source":"unavailable","data":null,"message":"该功能尚未接入真实系统"}\n'; }
+
+# 安全过滤
+safe_param() {
+    echo "$1" | tr -cd 'a-zA-Z0-9._:-' | head -c 128
+}
+
+case "$1" in
+  list)
+    cat <<EOF
+{
+  "lan.list": {},
+  "lan.get": {"name":"lan"},
+  "lan.create": {"name":"lan2","device":"eth1","ipaddr":"192.168.2.1","netmask":"255.255.255.0"},
+  "lan.delete": {"name":"lan2"},
+  "lan.set_ipaddr": {"name":"lan","ipaddr":"192.168.1.1"},
+  "lan.set_netmask": {"name":"lan","netmask":"255.255.255.0"},
+  "lan.set_mtu": {"name":"lan","mtu":"1500"},
+  "lan.set_device": {"name":"lan","device":"eth0"},
+  "lan.set_enabled": {"name":"lan","enabled":"1"},
+  "lan.set_description": {"name":"lan","description":"note"},
+  "lan.set_dhcp": {"name":"lan","enabled":"1","start":"100","limit":"150","leasetime":"12h"},
+  "lan.leases": {"name":"lan"},
+  "wan.list": {},
+  "wan.get": {"name":"wan"},
+  "wan.create": {"name":"wan2","proto":"dhcp","device":"eth1"},
+  "wan.delete": {"name":"wan"},
+  "wan.set_proto": {"name":"wan","proto":"dhcp"},
+  "wan.set_static": {"name":"wan","ipaddr":"1.2.3.4","netmask":"255.255.255.0","gateway":"1.2.3.1","dns":"8.8.8.8"},
+  "wan.set_pppoe": {"name":"wan","username":"user","password":"pass"},
+  "wan.set_enabled": {"name":"wan","enabled":"1"},
+  "wan.set_device": {"name":"wan","device":"eth1"},
+  "wan.set_mtu": {"name":"wan","mtu":"1492"},
+  "wan.set_description": {"name":"wan","description":"note"},
+  "wan.connect": {"name":"wan"},
+  "wan.disconnect": {"name":"wan"},
+  "wan.reconnect": {"name":"wan"},
+  "wan.status": {"name":"wan"}
+}
+EOF
+  ;;
+
+  call)
+    method="$2"
+    case "$method" in
+
+      # ==================== LAN ====================
+
+      lan.list)
+        # 列出所有LAN接口
+        RESULT="["
+        FIRST=1
+        for sec in $(uci show network 2>/dev/null | grep "=interface" | cut -d. -f2 | cut -d= -f1); do
+          # 排除wan类型
+          IS_WAN=$(uci get network.$sec.proto 2>/dev/null)
+          case "$IS_WAN" in
+            pppoe|dhcp|static) 
+              # 检查是否是wan (通过名称或wan标记)
+              case "$sec" in wan*) continue ;; esac
+              ;;
+          esac
+          # 只包含lan类型
+          case "$sec" in
+            lan*)
+              IPADDR=$(uci get network.$sec.ipaddr 2>/dev/null || echo "")
+              NETMASK=$(uci get network.$sec.netmask 2>/dev/null || echo "")
+              DEVICE=$(uci get network.$sec.device 2>/dev/null || echo "")
+              MTU=$(uci get network.$sec.mtu 2>/dev/null || echo "1500")
+              DESC=$(uci get network.$sec.description 2>/dev/null || echo "")
+              # 获取运行状态
+              UP=$(ubus call network.interface.$sec status 2>/dev/null | jsonfilter -e '@.up' 2>/dev/null || echo "false")
+              [ $FIRST -eq 0 ] && RESULT="${RESULT},"
+              RESULT="${RESULT}{\"name\":\"${sec}\",\"ipaddr\":\"${IPADDR}\",\"netmask\":\"${NETMASK}\",\"device\":\"${DEVICE}\",\"mtu\":\"${MTU}\",\"description\":\"${DESC}\",\"up\":${UP}}"
+              FIRST=0
+              ;;
+          esac
+        done
+        RESULT="${RESULT}]"
+        json_ok "{\"interfaces\":${RESULT}}"
+        ;;
+
+      lan.get)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        [ -z "$NAME" ] && { json_err "name required"; exit 0; }
+        uci get network.$NAME >/dev/null 2>&1 || { json_err "interface not found: $NAME"; exit 0; }
+        IPADDR=$(uci get network.$NAME.ipaddr 2>/dev/null || echo "")
+        NETMASK=$(uci get network.$NAME.netmask 2>/dev/null || echo "")
+        DEVICE=$(uci get network.$NAME.device 2>/dev/null || echo "")
+        MTU=$(uci get network.$NAME.mtu 2>/dev/null || echo "1500")
+        DESC=$(uci get network.$NAME.description 2>/dev/null || echo "")
+        IP6ADDR=$(uci get network.$NAME.ip6addr 2>/dev/null || echo "")
+        # DHCP配置
+        DHCP_EN=$(uci get dhcp.$NAME.ignore 2>/dev/null || echo "0")
+        DHCP_START=$(uci get dhcp.$NAME.start 2>/dev/null || echo "100")
+        DHCP_LIMIT=$(uci get dhcp.$NAME.limit 2>/dev/null || echo "150")
+        DHCP_LEASE=$(uci get dhcp.$NAME.leasetime 2>/dev/null || echo "12h")
+        # 运行状态
+        STATUS=$(ubus call network.interface.$NAME status 2>/dev/null)
+        UP=$(echo "$STATUS" | jsonfilter -e '@.up' 2>/dev/null || echo "false")
+        ACTUAL_IP=$(echo "$STATUS" | jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null || echo "")
+        json_ok "{\"name\":\"${NAME}\",\"ipaddr\":\"${IPADDR}\",\"netmask\":\"${NETMASK}\",\"device\":\"${DEVICE}\",\"mtu\":\"${MTU}\",\"description\":\"${DESC}\",\"ip6addr\":\"${IP6ADDR}\",\"up\":${UP},\"actual_ip\":\"${ACTUAL_IP}\",\"dhcp\":{\"enabled\":$([ \"$DHCP_EN\" = \"0\" ] && echo true || echo false),\"start\":\"${DHCP_START}\",\"limit\":\"${DHCP_LIMIT}\",\"leasetime\":\"${DHCP_LEASE}\"}}"
+        ;;
+
+      lan.create)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        DEVICE=$(echo "$input" | jsonfilter -e '@.device' 2>/dev/null | tr -cd 'a-zA-Z0-9._-')
+        IPADDR=$(echo "$input" | jsonfilter -e '@.ipaddr' 2>/dev/null | tr -cd '0-9.')
+        NETMASK=$(echo "$input" | jsonfilter -e '@.netmask' 2>/dev/null | tr -cd '0-9.')
+        [ -z "$NAME" ] && { json_err "name required"; exit 0; }
+        # 检查重复
+        uci get network.$NAME >/dev/null 2>&1 && { json_err "interface already exists: $NAME"; exit 0; }
+        # 检查网段冲突
+        for sec in $(uci show network 2>/dev/null | grep "=interface" | cut -d. -f2 | cut -d= -f1); do
+          EXIST_IP=$(uci get network.$sec.ipaddr 2>/dev/null || echo "")
+          if [ -n "$EXIST_IP" ] && [ -n "$IPADDR" ] && [ "$EXIST_IP" = "$IPADDR" ]; then
+            json_err "IP conflict with $sec"
+            exit 0
+          fi
+        done
+        if [ -f "$NETCTL" ]; then
+          netctl_lock || { json_err "lock failed"; exit 0; }
+          netctl_backup network >/dev/null
+          uci set network.$NAME=interface
+          uci set network.$NAME.proto=static
+          [ -n "$DEVICE" ] && uci set network.$NAME.device="$DEVICE"
+          [ -n "$IPADDR" ] && uci set network.$NAME.ipaddr="$IPADDR"
+          [ -n "$NETMASK" ] && uci set network.$NAME.netmask="$NETMASK"
+          uci commit network
+          netctl_unlock
+          netctl_log "LAN_CREATE" "$NAME ip=$IPADDR dev=$DEVICE"
+          json_ok "{\"name\":\"${NAME}\",\"action\":\"created\"}" true
+        else
+          json_err "netctl not available"
+        fi
+        ;;
+
+      lan.delete)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        [ -z "$NAME" ] && { json_err "name required"; exit 0; }
+        # 保护管理LAN
+        if [ "$NAME" = "lan" ]; then
+          # 检查是否唯一LAN
+          LAN_COUNT=$(uci show network 2>/dev/null | grep "=interface" | cut -d. -f2 | cut -d= -f1 | grep -c "^lan")
+          if [ "$LAN_COUNT" -le 1 ]; then
+            json_err "cannot delete the only management LAN"
+            exit 0
+          fi
+        fi
+        uci get network.$NAME >/dev/null 2>&1 || { json_err "not found: $NAME"; exit 0; }
+        if [ -f "$NETCTL" ]; then
+          netctl_lock || { json_err "lock failed"; exit 0; }
+          netctl_backup network >/dev/null
+          uci delete network.$NAME 2>/dev/null
+          uci delete dhcp.$NAME 2>/dev/null
+          uci commit network
+          uci commit dhcp 2>/dev/null
+          netctl_unlock
+          netctl_log "LAN_DELETE" "$NAME"
+          json_ok "{\"name\":\"${NAME}\",\"action\":\"deleted\"}" true
+        else
+          json_err "netctl not available"
+        fi
+        ;;
+
+      lan.set_ipaddr)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        IPADDR=$(echo "$input" | jsonfilter -e '@.ipaddr' 2>/dev/null | tr -cd '0-9.')
+        [ -z "$NAME" ] || [ -z "$IPADDR" ] && { json_err "name and ipaddr required"; exit 0; }
+        # 验证IP格式
+        echo "$IPADDR" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || { json_err "invalid IP format"; exit 0; }
+        if [ -f "$NETCTL" ]; then
+          netctl_set "network" "$NAME" "ipaddr" "$IPADDR"
+        else
+          json_err "netctl not available"
+        fi
+        ;;
+
+      lan.set_netmask)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        NETMASK=$(echo "$input" | jsonfilter -e '@.netmask' 2>/dev/null | tr -cd '0-9.')
+        [ -z "$NAME" ] || [ -z "$NETMASK" ] && { json_err "name and netmask required"; exit 0; }
+        if [ -f "$NETCTL" ]; then
+          netctl_set "network" "$NAME" "netmask" "$NETMASK"
+        else
+          json_err "netctl not available"
+        fi
+        ;;
+
+      lan.set_mtu)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        MTU=$(echo "$input" | jsonfilter -e '@.mtu' 2>/dev/null | tr -cd '0-9')
+        [ -z "$NAME" ] || [ -z "$MTU" ] && { json_err "name and mtu required"; exit 0; }
+        if [ -f "$NETCTL" ]; then
+          netctl_set "network" "$NAME" "mtu" "$MTU"
+        else
+          json_err "netctl not available"
+        fi
+        ;;
+
+      lan.set_device)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        DEVICE=$(echo "$input" | jsonfilter -e '@.device' 2>/dev/null | tr -cd 'a-zA-Z0-9._-')
+        [ -z "$NAME" ] || [ -z "$DEVICE" ] && { json_err "name and device required"; exit 0; }
+        # 检查设备是否被其他接口占用
+        for sec in $(uci show network 2>/dev/null | grep "=interface" | cut -d. -f2 | cut -d= -f1); do
+          [ "$sec" = "$NAME" ] && continue
+          EXIST_DEV=$(uci get network.$sec.device 2>/dev/null || echo "")
+          if [ "$EXIST_DEV" = "$DEVICE" ]; then
+            json_err "device $DEVICE already bound to $sec"
+            exit 0
+          fi
+        done
+        if [ -f "$NETCTL" ]; then
+          netctl_set "network" "$NAME" "device" "$DEVICE"
+        else
+          json_err "netctl not available"
+        fi
+        ;;
+
+      lan.set_enabled)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        ENABLED=$(echo "$input" | jsonfilter -e '@.enabled' 2>/dev/null | tr -cd '01')
+        [ -z "$NAME" ] && { json_err "name required"; exit 0; }
+        if [ "$ENABLED" = "1" ]; then
+          ubus call network.interface.$NAME up 2>/dev/null || ifup "$NAME" 2>/dev/null
+          json_ok "{\"name\":\"${NAME}\",\"action\":\"up\"}" true
+        else
+          ubus call network.interface.$NAME down 2>/dev/null || ifdown "$NAME" 2>/dev/null
+          json_ok "{\"name\":\"${NAME}\",\"action\":\"down\"}" true
+        fi
+        ;;
+
+      lan.set_description)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        DESC=$(echo "$input" | jsonfilter -e '@.description' 2>/dev/null | head -c 128)
+        [ -z "$NAME" ] && { json_err "name required"; exit 0; }
+        if [ -f "$NETCTL" ]; then
+          netctl_set "network" "$NAME" "description" "$DESC"
+        else
+          json_err "netctl not available"
+        fi
+        ;;
+
+      lan.set_dhcp)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        ENABLED=$(echo "$input" | jsonfilter -e '@.enabled' 2>/dev/null | tr -cd '01')
+        START=$(echo "$input" | jsonfilter -e '@.start' 2>/dev/null | tr -cd '0-9')
+        LIMIT=$(echo "$input" | jsonfilter -e '@.limit' 2>/dev/null | tr -cd '0-9')
+        LEASETIME=$(echo "$input" | jsonfilter -e '@.leasetime' 2>/dev/null | tr -cd '0-9hmsd')
+        [ -z "$NAME" ] && { json_err "name required"; exit 0; }
+        if [ -f "$NETCTL" ]; then
+          netctl_lock || { json_err "lock failed"; exit 0; }
+          netctl_backup dhcp >/dev/null
+          if [ "$ENABLED" = "1" ]; then
+            uci set dhcp.$NAME.ignore=0 2>/dev/null || uci set dhcp.$NAME=dhcp
+            [ -n "$START" ] && uci set dhcp.$NAME.start="$START"
+            [ -n "$LIMIT" ] && uci set dhcp.$NAME.limit="$LIMIT"
+            [ -n "$LEASETIME" ] && uci set dhcp.$NAME.leasetime="$LEASETIME"
+          else
+            uci set dhcp.$NAME.ignore=1 2>/dev/null
+          fi
+          uci commit dhcp
+          netctl_unlock
+          netctl_log "LAN_DHCP" "$NAME enabled=$ENABLED"
+          json_ok "{\"name\":\"${NAME}\",\"dhcp_enabled\":$([ \"$ENABLED\" = \"1\" ] && echo true || echo false)}" true
+        else
+          json_err "netctl not available"
+        fi
+        ;;
+
+      lan.leases)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        # 读取dnsmasq租约
+        LEASES="["
+        FIRST=1
+        if [ -f /tmp/dhcp.leases ]; then
+          while read -r ts mac ip hostname duid; do
+            [ -z "$ip" ] && continue
+            [ $FIRST -eq 0 ] && LEASES="${LEASES},"
+            LEASES="${LEASES}{\"mac\":\"${mac}\",\"ip\":\"${ip}\",\"hostname\":\"${hostname}\",\"expires\":\"${ts}\"}"
+            FIRST=0
+          done < /tmp/dhcp.leases
+        fi
+        LEASES="${LEASES}]"
+        json_ok "{\"leases\":${LEASES}}"
+        ;;
+
+      # ==================== WAN ====================
+
+      wan.list)
+        RESULT="["
+        FIRST=1
+        for sec in $(uci show network 2>/dev/null | grep "=interface" | cut -d. -f2 | cut -d= -f1); do
+          case "$sec" in
+            wan*)
+              PROTO=$(uci get network.$sec.proto 2>/dev/null || echo "none")
+              DEVICE=$(uci get network.$sec.device 2>/dev/null || echo "")
+              DESC=$(uci get network.$sec.description 2>/dev/null || echo "")
+              MTU=$(uci get network.$sec.mtu 2>/dev/null || echo "")
+              # 运行状态
+              STATUS=$(ubus call network.interface.$sec status 2>/dev/null)
+              UP=$(echo "$STATUS" | jsonfilter -e '@.up' 2>/dev/null || echo "false")
+              IP4=$(echo "$STATUS" | jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null || echo "")
+              GW=$(echo "$STATUS" | jsonfilter -e '@.route[0].nexthop' 2>/dev/null || echo "")
+              UPTIME=$(echo "$STATUS" | jsonfilter -e '@.uptime' 2>/dev/null || echo "0")
+              [ $FIRST -eq 0 ] && RESULT="${RESULT},"
+              RESULT="${RESULT}{\"name\":\"${sec}\",\"proto\":\"${PROTO}\",\"device\":\"${DEVICE}\",\"description\":\"${DESC}\",\"mtu\":\"${MTU}\",\"up\":${UP},\"ipv4\":\"${IP4}\",\"gateway\":\"${GW}\",\"uptime\":${UPTIME}}"
+              FIRST=0
+              ;;
+          esac
+        done
+        RESULT="${RESULT}]"
+        json_ok "{\"interfaces\":${RESULT}}"
+        ;;
+
+      wan.get)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        [ -z "$NAME" ] && { json_err "name required"; exit 0; }
+        uci get network.$NAME >/dev/null 2>&1 || { json_err "not found: $NAME"; exit 0; }
+        PROTO=$(uci get network.$NAME.proto 2>/dev/null || echo "none")
+        DEVICE=$(uci get network.$NAME.device 2>/dev/null || echo "")
+        IPADDR=$(uci get network.$NAME.ipaddr 2>/dev/null || echo "")
+        NETMASK=$(uci get network.$NAME.netmask 2>/dev/null || echo "")
+        GATEWAY=$(uci get network.$NAME.gateway 2>/dev/null || echo "")
+        DNS=$(uci get network.$NAME.dns 2>/dev/null || echo "")
+        MTU=$(uci get network.$NAME.mtu 2>/dev/null || echo "")
+        DESC=$(uci get network.$NAME.description 2>/dev/null || echo "")
+        USERNAME=$(uci get network.$NAME.username 2>/dev/null || echo "")
+        # 运行状态
+        STATUS=$(ubus call network.interface.$NAME status 2>/dev/null)
+        UP=$(echo "$STATUS" | jsonfilter -e '@.up' 2>/dev/null || echo "false")
+        ACT_IP=$(echo "$STATUS" | jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null || echo "")
+        ACT_GW=$(echo "$STATUS" | jsonfilter -e '@.route[0].nexthop' 2>/dev/null || echo "")
+        ACT_DNS=$(echo "$STATUS" | jsonfilter -e '@["dns-server"][0]' 2>/dev/null || echo "")
+        UPTIME=$(echo "$STATUS" | jsonfilter -e '@.uptime' 2>/dev/null || echo "0")
+        # 密码脱敏
+        HAS_PASS="false"
+        uci get network.$NAME.password >/dev/null 2>&1 && HAS_PASS="true"
+        json_ok "{\"name\":\"${NAME}\",\"proto\":\"${PROTO}\",\"device\":\"${DEVICE}\",\"ipaddr\":\"${IPADDR}\",\"netmask\":\"${NETMASK}\",\"gateway\":\"${GATEWAY}\",\"dns\":\"${DNS}\",\"mtu\":\"${MTU}\",\"description\":\"${DESC}\",\"username\":\"${USERNAME}\",\"has_password\":${HAS_PASS},\"up\":${UP},\"actual_ip\":\"${ACT_IP}\",\"actual_gateway\":\"${ACT_GW}\",\"actual_dns\":\"${ACT_DNS}\",\"uptime\":${UPTIME}}"
+        ;;
+
+      wan.create)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        PROTO=$(echo "$input" | jsonfilter -e '@.proto' 2>/dev/null | tr -cd 'a-z')
+        DEVICE=$(echo "$input" | jsonfilter -e '@.device' 2>/dev/null | tr -cd 'a-zA-Z0-9._-')
+        [ -z "$NAME" ] && { json_err "name required"; exit 0; }
+        uci get network.$NAME >/dev/null 2>&1 && { json_err "already exists: $NAME"; exit 0; }
+        case "$PROTO" in dhcp|static|pppoe) ;; *) PROTO="dhcp" ;; esac
+        if [ -f "$NETCTL" ]; then
+          netctl_lock || { json_err "lock failed"; exit 0; }
+          netctl_backup network >/dev/null
+          uci set network.$NAME=interface
+          uci set network.$NAME.proto="$PROTO"
+          [ -n "$DEVICE" ] && uci set network.$NAME.device="$DEVICE"
+          uci commit network
+          netctl_unlock
+          netctl_log "WAN_CREATE" "$NAME proto=$PROTO dev=$DEVICE"
+          json_ok "{\"name\":\"${NAME}\",\"action\":\"created\"}" true
+        else
+          json_err "netctl not available"
+        fi
+        ;;
+
+      wan.delete)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        [ -z "$NAME" ] && { json_err "name required"; exit 0; }
+        uci get network.$NAME >/dev/null 2>&1 || { json_err "not found: $NAME"; exit 0; }
+        if [ -f "$NETCTL" ]; then
+          netctl_lock || { json_err "lock failed"; exit 0; }
+          netctl_backup network >/dev/null
+          uci delete network.$NAME 2>/dev/null
+          uci commit network
+          netctl_unlock
+          netctl_log "WAN_DELETE" "$NAME"
+          json_ok "{\"name\":\"${NAME}\",\"action\":\"deleted\"}" true
+        else
+          json_err "netctl not available"
+        fi
+        ;;
+
+      wan.set_proto)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        PROTO=$(echo "$input" | jsonfilter -e '@.proto' 2>/dev/null | tr -cd 'a-z')
+        [ -z "$NAME" ] || [ -z "$PROTO" ] && { json_err "name and proto required"; exit 0; }
+        case "$PROTO" in dhcp|static|pppoe|none) ;; *) json_err "invalid proto: $PROTO"; exit 0 ;; esac
+        if [ -f "$NETCTL" ]; then
+          netctl_set "network" "$NAME" "proto" "$PROTO"
+        else
+          json_err "netctl not available"
+        fi
+        ;;
+
+      wan.set_static)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        IPADDR=$(echo "$input" | jsonfilter -e '@.ipaddr' 2>/dev/null | tr -cd '0-9./')
+        NETMASK=$(echo "$input" | jsonfilter -e '@.netmask' 2>/dev/null | tr -cd '0-9.')
+        GATEWAY=$(echo "$input" | jsonfilter -e '@.gateway' 2>/dev/null | tr -cd '0-9.')
+        DNS=$(echo "$input" | jsonfilter -e '@.dns' 2>/dev/null | tr -cd '0-9. ')
+        [ -z "$NAME" ] && { json_err "name required"; exit 0; }
+        if [ -f "$NETCTL" ]; then
+          netctl_lock || { json_err "lock failed"; exit 0; }
+          netctl_backup network >/dev/null
+          uci set network.$NAME.proto=static
+          [ -n "$IPADDR" ] && uci set network.$NAME.ipaddr="$IPADDR"
+          [ -n "$NETMASK" ] && uci set network.$NAME.netmask="$NETMASK"
+          [ -n "$GATEWAY" ] && uci set network.$NAME.gateway="$GATEWAY"
+          [ -n "$DNS" ] && uci set network.$NAME.dns="$DNS"
+          uci commit network
+          netctl_unlock
+          netctl_log "WAN_STATIC" "$NAME ip=$IPADDR gw=$GATEWAY"
+          json_ok "{\"name\":\"${NAME}\",\"proto\":\"static\",\"ipaddr\":\"${IPADDR}\"}" true
+        else
+          json_err "netctl not available"
+        fi
+        ;;
+
+      wan.set_pppoe)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        USERNAME=$(echo "$input" | jsonfilter -e '@.username' 2>/dev/null | head -c 128)
+        PASSWORD=$(echo "$input" | jsonfilter -e '@.password' 2>/dev/null | head -c 128)
+        [ -z "$NAME" ] || [ -z "$USERNAME" ] && { json_err "name and username required"; exit 0; }
+        if [ -f "$NETCTL" ]; then
+          netctl_lock || { json_err "lock failed"; exit 0; }
+          netctl_backup network >/dev/null
+          uci set network.$NAME.proto=pppoe
+          uci set network.$NAME.username="$USERNAME"
+          [ -n "$PASSWORD" ] && uci set network.$NAME.password="$PASSWORD"
+          uci commit network
+          netctl_unlock
+          netctl_log "WAN_PPPOE" "$NAME user=$USERNAME"
+          json_ok "{\"name\":\"${NAME}\",\"proto\":\"pppoe\",\"username\":\"${USERNAME}\"}" true
+        else
+          json_err "netctl not available"
+        fi
+        ;;
+
+      wan.set_enabled)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        ENABLED=$(echo "$input" | jsonfilter -e '@.enabled' 2>/dev/null | tr -cd '01')
+        [ -z "$NAME" ] && { json_err "name required"; exit 0; }
+        if [ "$ENABLED" = "1" ]; then
+          ubus call network.interface.$NAME up 2>/dev/null || ifup "$NAME" 2>/dev/null
+          json_ok "{\"name\":\"${NAME}\",\"action\":\"up\"}" true
+        else
+          ubus call network.interface.$NAME down 2>/dev/null || ifdown "$NAME" 2>/dev/null
+          json_ok "{\"name\":\"${NAME}\",\"action\":\"down\"}" true
+        fi
+        ;;
+
+      wan.set_device)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        DEVICE=$(echo "$input" | jsonfilter -e '@.device' 2>/dev/null | tr -cd 'a-zA-Z0-9._-')
+        [ -z "$NAME" ] || [ -z "$DEVICE" ] && { json_err "name and device required"; exit 0; }
+        if [ -f "$NETCTL" ]; then
+          netctl_set "network" "$NAME" "device" "$DEVICE"
+        else
+          json_err "netctl not available"
+        fi
+        ;;
+
+      wan.set_mtu)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        MTU=$(echo "$input" | jsonfilter -e '@.mtu' 2>/dev/null | tr -cd '0-9')
+        [ -z "$NAME" ] || [ -z "$MTU" ] && { json_err "name and mtu required"; exit 0; }
+        if [ -f "$NETCTL" ]; then
+          netctl_set "network" "$NAME" "mtu" "$MTU"
+        else
+          json_err "netctl not available"
+        fi
+        ;;
+
+      wan.set_description)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        DESC=$(echo "$input" | jsonfilter -e '@.description' 2>/dev/null | head -c 128)
+        [ -z "$NAME" ] && { json_err "name required"; exit 0; }
+        if [ -f "$NETCTL" ]; then
+          netctl_set "network" "$NAME" "description" "$DESC"
+        else
+          json_err "netctl not available"
+        fi
+        ;;
+
+      wan.connect)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        [ -z "$NAME" ] && { json_err "name required"; exit 0; }
+        ubus call network.interface.$NAME up 2>/dev/null || ifup "$NAME" 2>/dev/null
+        json_ok "{\"name\":\"${NAME}\",\"action\":\"connect\"}" true
+        ;;
+
+      wan.disconnect)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        [ -z "$NAME" ] && { json_err "name required"; exit 0; }
+        ubus call network.interface.$NAME down 2>/dev/null || ifdown "$NAME" 2>/dev/null
+        json_ok "{\"name\":\"${NAME}\",\"action\":\"disconnect\"}" true
+        ;;
+
+      wan.reconnect)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        [ -z "$NAME" ] && { json_err "name required"; exit 0; }
+        ubus call network.interface.$NAME down 2>/dev/null
+        sleep 1
+        ubus call network.interface.$NAME up 2>/dev/null || ifup "$NAME" 2>/dev/null
+        json_ok "{\"name\":\"${NAME}\",\"action\":\"reconnect\"}" true
+        ;;
+
+      wan.status)
+        read -r input
+        NAME=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null | tr -cd 'a-zA-Z0-9_')
+        [ -z "$NAME" ] && { json_err "name required"; exit 0; }
+        STATUS=$(ubus call network.interface.$NAME status 2>/dev/null)
+        if [ -n "$STATUS" ]; then
+          UP=$(echo "$STATUS" | jsonfilter -e '@.up' 2>/dev/null || echo "false")
+          IP4=$(echo "$STATUS" | jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null || echo "")
+          IP6=$(echo "$STATUS" | jsonfilter -e '@["ipv6-address"][0].address' 2>/dev/null || echo "")
+          GW=$(echo "$STATUS" | jsonfilter -e '@.route[0].nexthop' 2>/dev/null || echo "")
+          DNS=$(echo "$STATUS" | jsonfilter -e '@["dns-server"][0]' 2>/dev/null || echo "")
+          UPTIME=$(echo "$STATUS" | jsonfilter -e '@.uptime' 2>/dev/null || echo "0")
+          json_ok "{\"name\":\"${NAME}\",\"up\":${UP},\"ipv4\":\"${IP4}\",\"ipv6\":\"${IP6}\",\"gateway\":\"${GW}\",\"dns\":\"${DNS}\",\"uptime\":${UPTIME}}"
+        else
+          json_err "interface not found or ubus unavailable"
+        fi
+        ;;
+
+      *)
+        json_ni
+        ;;
+    esac
+  ;;
+esac

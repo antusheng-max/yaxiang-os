@@ -1,0 +1,54 @@
+#!/bin/sh
+# Yaxiang OS - System Status Collector
+# Collects system status, interface status, traffic counters
+# Runs as a background daemon managed by procd
+
+LOG_FILE="/var/log/yaxiang/yaxiang-core.log"
+STATUS_FILE="/var/run/yaxiang/status.json"
+INTERVAL=30
+
+log_msg() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE" 2>/dev/null
+}
+
+collect_status() {
+  # Collect system status
+  HOSTNAME=$(hostname 2>/dev/null || echo "unknown")
+  UPTIME=$(cat /proc/uptime 2>/dev/null | awk '{print $1}' || echo "0")
+  LOAD=$(cat /proc/loadavg 2>/dev/null | awk '{print $1}' || echo "0")
+  MEM_TOTAL=$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo "0")
+  MEM_FREE=$(awk '/MemAvailable/ {print $2}' /proc/meminfo 2>/dev/null || echo "0")
+
+  # Collect interface status
+  IFACES="["
+  FIRST=1
+  for iface in $(ls /sys/class/net/ 2>/dev/null | grep -v lo); do
+    CARRIER=$(cat /sys/class/net/$iface/carrier 2>/dev/null || echo "0")
+    [ $FIRST -eq 0 ] && IFACES="${IFACES},"
+    IFACES="${IFACES}{\"name\":\"${iface}\",\"carrier\":${CARRIER}}"
+    FIRST=0
+  done
+  IFACES="${IFACES}]"
+
+  # Write status
+  cat > "$STATUS_FILE" << EOF
+{
+  "hostname": "${HOSTNAME}",
+  "uptime": ${UPTIME},
+  "load": ${LOAD},
+  "mem_total_kb": ${MEM_TOTAL},
+  "mem_free_kb": ${MEM_FREE},
+  "interfaces": ${IFACES},
+  "collected_at": "$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S')"
+}
+EOF
+}
+
+# Main loop
+log_msg "yaxiang-collect started"
+mkdir -p /var/run/yaxiang /var/log/yaxiang
+
+while true; do
+  collect_status
+  sleep "$INTERVAL"
+done

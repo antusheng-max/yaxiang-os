@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">亚象</title>
+  <g fill="#1677ff">
+    <ellipse cx="30" cy="38" rx="18" ry="14"/>
+    <circle cx="46" cy="28" r="10"/>
+    <path d="M52 32 Q58 36 56 44 Q54 50 48 48" fill="none" stroke="#1677ff" stroke-width="3" stroke-linecap="round"/>
+    <ellipse cx="42" cy="22" rx="6" ry="8" transform="rotate(-20 42 22)"/>
+    <circle cx="48" cy="26" r="1.5" fill="#fff"/>
+    <rect x="24" y="48" width="5" height="10" rx="2"/>
+    <rect x="34" y="48" width="5" height="10" rx="2"/>
+    <rect x="18" y="46" width="5" height="10" rx="2"/>
+    <rect x="40" y="46" width="5" height="10" rx="2"/>
+    <path d="M14 36 Q8 38 10 44" fill="none" stroke="#1677ff" stroke-width="2" stroke-linecap="round"/>
+  </g>
+</svg>
