@@ -1,4 +1,15 @@
-# 亚象网络操作系统 (Yaxiang OS)
+# 亚象网络操作系统（Yaxiang OS）
+
+## 当前版本：YX OS 1.0（v0.3-dev 开发测试版）
+
+### 系统镜像下载
+
+- [点击下载 x86_64 安装镜像](https://github.com/antusheng-max/yaxiang-os/releases/download/v0.3-dev/Yaxiang-OS-V0.3-dev-x86_64-installer.iso)
+- [查看全部下载文件及 SHA256 校验](https://github.com/antusheng-max/yaxiang-os/releases/tag/v0.3-dev)
+
+> 当前版本为开发测试版，请先在虚拟机或隔离环境中测试，不建议直接用于生产环境。
+
+---
 
 基于 OpenWrt 的 x86_64 多WAN网络管理系统。
 
