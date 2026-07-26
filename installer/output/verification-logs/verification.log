@@ -1,0 +1,218 @@
+[2026-07-26 12:46:07] ========== 0. ISO SHA256 基础校验 ==========
+[2026-07-26 12:46:10] Expected: 7108cc8583361df63716bfac622cb27950ea0706989efc3d3a196dc51f1ca14d
+[2026-07-26 12:46:10] Actual:   7108cc8583361df63716bfac622cb27950ea0706989efc3d3a196dc51f1ca14d
+[2026-07-26 12:46:10] [PASS] sha256_baseline: ISO 哈希匹配
+[2026-07-26 12:46:10] ISO 大小: 598M
+[2026-07-26 12:46:10] 
+[2026-07-26 12:46:10] ========== 1. bios_boot_test ==========
+[2026-07-26 12:46:10] QEMU 命令: qemu-system-x86_64 -m 2048 -no-reboot -display none -serial stdio -cdrom /root/project/installer/output/Yaxiang-OS-V0.3-dev-x86_64-installer.iso -boot d
+[2026-07-26 12:48:10] QEMU 退出码: 124 (124=timeout 正常)
+[2026-07-26 12:48:10] 日志大小: 29284 bytes, 423 行
+[2026-07-26 12:48:10] [PASS] bios_boot: GRUB 引导加载程序启动
+[2026-07-26 12:48:10] [PASS] bios_boot: Linux 内核启动
+[2026-07-26 12:48:10] [PASS] bios_boot: 从 CD-ROM/ISO 启动
+[2026-07-26 12:48:10] [PASS] bios_boot: 检测到 live media / squashfs
+[2026-07-26 12:48:10] [INFO] switch_root 未在串口输出
+[2026-07-26 12:48:10] [PASS] bios_boot: 无 'Could not find live media' 错误
+[2026-07-26 12:48:10] [PASS] bios_boot: 检测到亚象/安装程序标识
+[2026-07-26 12:48:10] --- BIOS 串口日志 (前 40 行) ---
+[H[J[1;1H[?25l[m[H[J[1;1H[2;30HGNU GRUB  version 2.06
+
+[m[4;2H+----------------------------------------------------------------------------+[5;2H|[5;79H|[6;2H|[6;79H|[7;2H|[7;79H|[8;2H|[8;79H|[9;2H|[9;79H|[10;2H|[10;79H|[11;2H|[11;79H|[12;2H|[12;79H|[13;2H|[13;79H|[14;2H|[14;79H|[15;2H|[15;79H|[16;2H|[16;79H|[17;2H+----------------------------------------------------------------------------+[m[18;2H[19;2H[m     Use the ^ and v keys to select which entry is highlighted.          
+      Press enter to boot the selected OS, `e' to edit the commands       
+      before booting or `c' for a command-line.                           [5;80H [7m[5;3H*???????? (Start Yaxiang Installer)                                         [m[5;78H[m[m[6;3H ?????? (Safe Graphics / Compatibility)                                     [m[6;78H[m[m[7;3H ?????? (Maintenance Shell)                                                 [m[7;78H[m[m[8;3H ?? (Reboot)                                                                [m[8;78H[m[m[9;3H ?? (Power Off)                                                             [m[9;78H[m[m[10;3H                                                                            [m[10;78H[m[m[11;3H                                                                            [m[11;78H[m[m[12;3H                                                                            [m[12;78H[m[m[13;3H                                                                            [m[13;78H[m[m[14;3H                                                                            [m[14;78H[m[m[15;3H                                                                            [m[15;78H[m[m[16;3H                                                                            [m[16;78H[m[16;80H [5;78H[22;1H   The highlighted entry will be executed automatically in 5s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 4s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 3s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 2s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 1s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 0s.                 [5;78H[?25h[H[J[1;1H[H[J[1;1H[    0.000000] Linux version 5.15.0-25-generic (buildd@ubuntu) (gcc (Ubuntu 11.2.0-19ubuntu1) 11.2.0, GNU ld (GNU Binutils for Ubuntu) 2.38) #25-Ubuntu SMP Wed Mar 30 15:54:22 UTC 2022 (Ubuntu 5.15.0-25.25-generic 5.15.30)
+[    0.000000] Command line: BOOT_IMAGE=/boot/vmlinuz boot=live console=tty1 console=ttyS0,115200n8
+[    0.000000] KERNEL supported cpus:
+[    0.000000]   Intel GenuineIntel
+[    0.000000]   AMD AuthenticAMD
+[    0.000000]   Hygon HygonGenuine
+[    0.000000]   Centaur CentaurHauls
+[    0.000000]   zhaoxin   Shanghai  
+[    0.000000] x86/fpu: x87 FPU will use FXSAVE
+[    0.000000] signal: max sigframe size: 1440
+[    0.000000] BIOS-provided physical RAM map:
+[    0.000000] BIOS-e820: [mem 0x0000000000000000-0x000000000009fbff] usable
+[    0.000000] BIOS-e820: [mem 0x000000000009fc00-0x000000000009ffff] reserved
+[    0.000000] BIOS-e820: [mem 0x00000000000f0000-0x00000000000fffff] reserved
+[    0.000000] BIOS-e820: [mem 0x0000000000100000-0x000000007ffdffff] usable
+[    0.000000] BIOS-e820: [mem 0x000000007ffe0000-0x000000007fffffff] reserved
+[    0.000000] BIOS-e820: [mem 0x00000000fffc0000-0x00000000ffffffff] reserved
+[    0.000000] NX (Execute Disable) protection: active
+[    0.000000] SMBIOS 2.8 present.
+[    0.000000] DMI: QEMU Standard PC (i440FX + PIIX, 1996), BIOS 1.15.0-1 04/01/2014
+[    0.000000] tsc: Fast TSC calibration using PIT
+[    0.000000] tsc: Detected 2499.951 MHz processor
+[    0.011699] AGP: No AGP bridge found
+[    0.012013] last_pfn = 0x7ffe0 max_arch_pfn = 0x400000000
+[    0.013072] x86/PAT: Configuration [0-7]: WB  WC  UC- UC  WB  WP  UC- WT  
+[    0.030506] found SMP MP-table at [mem 0x000f5ba0-0x000f5baf]
+[    0.036781] RAMDISK: [mem 0x3449d000-0x36245fff]
+[    0.037290] ACPI: Early table checksum verification disabled
+[    0.037821] ACPI: RSDP 0x00000000000F59E0 000014 (v00 BOCHS )
+[    0.038194] ACPI: RSDT 0x000000007FFE1905 000034 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.038982] ACPI: FACP 0x000000007FFE17B9 000074 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.039789] ACPI: DSDT 0x000000007FFE0040 001779 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.039899] ACPI: FACS 0x000000007FFE0000 000040
+[    0.039979] ACPI: APIC 0x000000007FFE182D 000078 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.040027] ACPI: HPET 0x000000007FFE18A5 000038 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.040067] ACPI: WAET 0x000000007FFE18DD 000028 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[2026-07-26 12:48:10] 
+[2026-07-26 12:48:10] ========== 2. uefi_boot_test ==========
+[2026-07-26 12:48:10] QEMU 命令: qemu-system-x86_64 -m 2048 -no-reboot -display none -serial stdio -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE.fd -drive if=pflash,format=raw,file=/root/project/installer/output/verify-final/ovmf-vars.fd -cdrom /root/project/installer/output/Yaxiang-OS-V0.3-dev-x86_64-installer.iso -boot d
+[2026-07-26 12:50:10] QEMU 退出码: 124
+[2026-07-26 12:50:10] 日志大小: 5058 bytes, 19 行
+[2026-07-26 12:50:10] [PASS] uefi_boot: UEFI 固件启动
+[2026-07-26 12:50:10] [PASS] uefi_boot: 无 'Could not find live media' 错误
+[2026-07-26 12:50:10] --- UEFI 串口日志 (前 40 行) ---
+[2J[01;01H[=3h[2J[01;01HBdsDxe: loading Boot0001 "UEFI QEMU DVD-ROM QM00003 " from PciRoot(0x0)/Pci(0x1,0x1)/Ata(Secondary,Master,0x0)
+BdsDxe: starting Boot0001 "UEFI QEMU DVD-ROM QM00003 " from PciRoot(0x0)/Pci(0x1,0x1)/Ata(Secondary,Master,0x0)
+[H[J[1;1H[?25l[m[H[J[1;1H[2;30HGNU GRUB  version 2.06
+
+[m[4;2H+----------------------------------------------------------------------------+[5;2H|[5;79H|[6;2H|[6;79H|[7;2H|[7;79H|[8;2H|[8;79H|[9;2H|[9;79H|[10;2H|[10;79H|[11;2H|[11;79H|[12;2H|[12;79H|[13;2H|[13;79H|[14;2H|[14;79H|[15;2H|[15;79H|[16;2H|[16;79H|[17;2H+----------------------------------------------------------------------------+[m[18;2H[19;2H[m     Use the ^ and v keys to select which entry is highlighted.          
+      Press enter to boot the selected OS, `e' to edit the commands       
+      before booting or `c' for a command-line.                           [5;80H [7m[5;3H*???????? (Start Yaxiang Installer)                                         [m[5;78H[m[m[6;3H ?????? (Safe Graphics / Compatibility)                                     [m[6;78H[m[m[7;3H ?????? (Maintenance Shell)                                                 [m[7;78H[m[m[8;3H ?? (Reboot)                                                                [m[8;78H[m[m[9;3H ?? (Power Off)                                                             [m[9;78H[m[m[10;3H                                                                            [m[10;78H[m[m[11;3H                                                                            [m[11;78H[m[m[12;3H                                                                            [m[12;78H[m[m[13;3H                                                                            [m[13;78H[m[m[14;3H                                                                            [m[14;78H[m[m[15;3H                                                                            [m[15;78H[m[m[16;3H                                                                            [m[16;78H[m[16;80H [5;78H[22;1H   The highlighted entry will be executed automatically in 5s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 4s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 3s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 2s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 1s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 0s.                 [5;78H[?25h[H[J[1;1H[H[J[1;1Herror: no server is specified.
+error: you need to load the kernel first.
+
+Press any key to continue...
+
+  Failed to boot both default and fallback entries.
+
+Press any key to continue...
+[?25l[m[H[J[1;1H[2;30HGNU GRUB  version 2.06
+
+[m[4;2H+----------------------------------------------------------------------------+[5;2H|[5;79H|[6;2H|[6;79H|[7;2H|[7;79H|[8;2H|[8;79H|[9;2H|[9;79H|[10;2H|[10;79H|[11;2H|[11;79H|[12;2H|[12;79H|[13;2H|[13;79H|[14;2H|[14;79H|[15;2H|[15;79H|[16;2H|[16;79H|[17;2H+----------------------------------------------------------------------------+[m[18;2H[19;2H[m     Use the ^ and v keys to select which entry is highlighted.          
+      Press enter to boot the selected OS, `e' to edit the commands       
+      before booting or `c' for a command-line.                           [5;80H [7m[5;3H*???????? (Start Yaxiang Installer)                                         [m[5;78H[m[m[6;3H ?????? (Safe Graphics / Compatibility)                                     [m[6;78H[m[m[7;3H ?????? (Maintenance Shell)                                                 [m[7;78H[m[m[8;3H ?? (Reboot)                                                                [m[8;78H[m[m[9;3H ?? (Power Off)                                                             [m[9;78H[m[m[10;3H                                                                            [m[10;78H[m[m[11;3H                                                                            [m[11;78H[m[m[12;3H                                                                            [m[12;78H[m[m[13;3H                                                                            [m[13;78H[m[m[14;3H                                                                            [m[14;78H[m[m[15;3H                                                                            [m[15;78H[m[m[16;3H                                                                            [m[16;78H[m[16;80H [5;78H[22;1H                                                                               [23;1H                                                                               [5;78Hqemu-system-x86_64: terminating on signal 15 from pid 147089 (timeout)
+[2026-07-26 12:50:10] 
+[2026-07-26 12:50:10] ========== 3. full_install_test ==========
+[2026-07-26 12:50:10] 创建空白 qcow2: /root/project/installer/output/verify-final/install-target.qcow2 (1G)
+[2026-07-26 12:50:10] 安装前磁盘信息:
+image: /root/project/installer/output/verify-final/install-target.qcow2
+file format: qcow2
+virtual size: 1 GiB (1073741824 bytes)
+disk size: 196 KiB
+cluster_size: 65536
+Format specific information:
+    compat: 1.1
+    compression type: zlib
+    lazy refcounts: false
+    refcount bits: 16
+    corrupt: false
+    extended l2: false
+[2026-07-26 12:50:11] 内核: /root/project/installer/output/verify-final/iso-extract/boot/vmlinuz (11M)
+[2026-07-26 12:50:11] initrd: /root/project/installer/output/verify-final/iso-extract/boot/initrd.img (30M)
+[2026-07-26 12:50:14] 自动安装 initrd: 30M
+[2026-07-26 12:50:14] QEMU 安装命令: qemu-system-x86_64 -m 2048 -no-reboot -display none -serial stdio -kernel /root/project/installer/output/verify-final/iso-extract/boot/vmlinuz -initrd /root/project/installer/output/verify-final/auto-install-initrd.img -append console=ttyS0,115200n8 -drive file=/root/project/installer/output/verify-final/install-target.qcow2,if=virtio,format=qcow2
+[2026-07-26 12:50:58] QEMU 安装退出码: 0
+[2026-07-26 12:50:58] [PASS] full_install: 安装器成功完成 (exit_code=0)
+[2026-07-26 12:50:58] [PASS] full_install: 安装后分区表已记录
+[2026-07-26 12:50:58] --- 安装后分区表 ---
+[PARTITION-TABLE-AFTER-INSTALL]
+Disk /dev/vda: 1024 MB, 1073741824 bytes, 2097152 sectors
+2080 cylinders, 16 heads, 63 sectors/track
+Units: sectors of 1 * 512 = 512 bytes
+
+Device  Boot StartCHS    EndCHS        StartLBA     EndLBA    Sectors  Size Id Type
+/dev/vda1 *  0,8,9       33,0,16            512      33279      32768 16.0M 83 Linux
+/dev/vda2    33,8,25     244,13,13        33792     246783     212992  104M 83 Linux
+[END-PARTITION-TABLE]
+[2026-07-26 12:50:58] [PASS] full_install: 写后校验通过
+[2026-07-26 12:50:58] 安装后磁盘信息:
+image: /root/project/installer/output/verify-final/install-target.qcow2
+file format: qcow2
+virtual size: 1 GiB (1073741824 bytes)
+disk size: 121 MiB
+cluster_size: 65536
+Format specific information:
+    compat: 1.1
+    compression type: zlib
+    lazy refcounts: false
+    refcount bits: 16
+    corrupt: false
+    extended l2: false
+[2026-07-26 12:50:58] 
+[2026-07-26 12:50:58] ========== 4. installed_boot_test ==========
+[2026-07-26 12:50:58] QEMU 命令 (无 -cdrom): qemu-system-x86_64 -m 1024 -no-reboot -display none -serial stdio -drive file=/root/project/installer/output/verify-final/install-target.qcow2,if=virtio,format=qcow2
+[2026-07-26 12:50:58] [PASS] installed_boot: 命令中无 -cdrom
+[2026-07-26 12:52:28] QEMU 退出码: 124
+[2026-07-26 12:52:28] 日志大小: 27977 bytes
+[2026-07-26 12:52:28] [PASS] installed_boot: Linux 内核从硬盘启动
+[2026-07-26 12:52:28] [PASS] installed_boot: 检测到系统服务启动
+[2026-07-26 12:52:28] --- 安装后启动日志 (前 40 行) ---
+[H[J[1;1H[?25l[m[H[J[1;1H[2;30HGNU GRUB  version 2.12
+
+[m[4;2H+----------------------------------------------------------------------------+[5;2H|[5;79H|[6;2H|[6;79H|[7;2H|[7;79H|[8;2H|[8;79H|[9;2H|[9;79H|[10;2H|[10;79H|[11;2H|[11;79H|[12;2H|[12;79H|[13;2H|[13;79H|[14;2H|[14;79H|[15;2H|[15;79H|[16;2H+----------------------------------------------------------------------------+[m[17;2H[18;2H[m     Use the ^ and v keys to select which entry is highlighted.          
+      Press enter to boot the selected OS, `e' to edit the commands       
+      before booting or `c' for a command-line. ESC to return             
+      previous menu.                                                      [5;80H [7m[5;3H*OpenWrt                                                                    [m[5;78H[m[m[6;3H OpenWrt (failsafe)                                                         [m[6;78H[m[m[7;3H                                                                            [m[7;78H[m[m[8;3H                                                                            [m[8;78H[m[m[9;3H                                                                            [m[9;78H[m[m[10;3H                                                                            [m[10;78H[m[m[11;3H                                                                            [m[11;78H[m[m[12;3H                                                                            [m[12;78H[m[m[13;3H                                                                            [m[13;78H[m[m[14;3H                                                                            [m[14;78H[m[m[15;3H                                                                            [m[15;78H[m[15;80H [5;78H[22;1H   The highlighted entry will be executed automatically in 5s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 4s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 3s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 2s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 1s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 0s.                 [5;78H[?25h[H[J[1;1H[H[J[1;1H  Booting `OpenWrt'
+
+[    0.000000] Linux version 6.12.94 (builder@buildhost) (x86_64-openwrt-linux-musl-gcc (OpenWrt GCC 14.3.0 r33051-f5dae5ece4) 14.3.0, GNU ld (GNU Binutils) 2.44) #0 SMP Mon Jun 29 12:59:20 2026
+[    0.000000] Command line: BOOT_IMAGE=/boot/vmlinuz root=PARTUUID=682d2ae8-02 rootwait console=tty1 console=ttyS0,115200n8 noinitrd
+[    0.000000] BIOS-provided physical RAM map:
+[    0.000000] BIOS-e820: [mem 0x0000000000000000-0x000000000009fbff] usable
+[    0.000000] BIOS-e820: [mem 0x000000000009fc00-0x000000000009ffff] reserved
+[    0.000000] BIOS-e820: [mem 0x00000000000f0000-0x00000000000fffff] reserved
+[    0.000000] BIOS-e820: [mem 0x0000000000100000-0x000000003ffdcfff] usable
+[    0.000000] BIOS-e820: [mem 0x000000003ffdd000-0x000000003fffffff] reserved
+[    0.000000] BIOS-e820: [mem 0x00000000fffc0000-0x00000000ffffffff] reserved
+[    0.000000] NX (Execute Disable) protection: active
+[    0.000000] APIC: Static calls initialized
+[    0.000000] SMBIOS 2.8 present.
+[    0.000000] DMI: QEMU Standard PC (i440FX + PIIX, 1996), BIOS 1.15.0-1 04/01/2014
+[    0.000000] DMI: Memory slots populated: 1/1
+[    0.000000] tsc: Fast TSC calibration using PIT
+[    0.000000] tsc: Detected 2499.957 MHz processor
+[    0.007152] AGP: No AGP bridge found
+[    0.007363] last_pfn = 0x3ffdd max_arch_pfn = 0x400000000
+[    0.007992] MTRR map: 4 entries (3 fixed + 1 variable; max 19), built from 8 variable MTRRs
+[    0.008148] x86/PAT: Configuration [0-7]: WB  WC  UC- UC  WB  WP  UC- WT  
+[    0.021993] found SMP MP-table at [mem 0x000f5b90-0x000f5b9f]
+[    0.026813] ACPI: Early table checksum verification disabled
+[    0.027131] ACPI: RSDP 0x00000000000F59D0 000014 (v00 BOCHS )
+[    0.027417] ACPI: RSDT 0x000000003FFE190C 000034 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.027898] ACPI: FACP 0x000000003FFE17C0 000074 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.028436] ACPI: DSDT 0x000000003FFE0040 001780 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.028500] ACPI: FACS 0x000000003FFE0000 000040
+[    0.028548] ACPI: APIC 0x000000003FFE1834 000078 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.028567] ACPI: HPET 0x000000003FFE18AC 000038 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.028583] ACPI: WAET 0x000000003FFE18E4 000028 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.028646] ACPI: Reserving FACP table memory at [mem 0x3ffe17c0-0x3ffe1833]
+[    0.028691] ACPI: Reserving DSDT table memory at [mem 0x3ffe0040-0x3ffe17bf]
+[    0.028697] ACPI: Reserving FACS table memory at [mem 0x3ffe0000-0x3ffe003f]
+[2026-07-26 12:52:28] 
+[2026-07-26 12:52:28] ========== 5. network_test ==========
+[2026-07-26 12:52:28] QEMU 命令: qemu-system-x86_64 -m 1024 -display none -serial stdio -drive file=/root/project/installer/output/verify-final/install-target.qcow2,if=virtio,format=qcow2 -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22,hostfwd=tcp:127.0.0.1:8080-:80 -device virtio-net-pci,netdev=net0
+[2026-07-26 12:52:28] QEMU PID: 147537
+[2026-07-26 12:52:28] 等待 SSH 就绪 (最多 60 秒)...
+[2026-07-26 12:53:29] [FAIL] network_test: SSH 超时, 无法检查网络
+[2026-07-26 12:53:29] [FAIL] web_test: SSH 超时, 无法检查 Web
+[2026-07-26 12:53:29] [INFO] 串口日志最后 30 行:
+qemu-system-x86_64: -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22,hostfwd=tcp:127.0.0.1:8080-:80: Could not set up host forwarding rule 'tcp:127.0.0.1:8080-:80'
+[2026-07-26 12:53:32] 
+[2026-07-26 12:53:32] ========== 7. sha256_test ==========
+[2026-07-26 12:53:36] 测试完成后 ISO SHA256: 7108cc8583361df63716bfac622cb27950ea0706989efc3d3a196dc51f1ca14d
+[2026-07-26 12:53:36] [PASS] sha256_test: ISO 哈希一致 (全部测试前后未改变)
+[2026-07-26 12:53:36] 通过测试的 ISO = 准备上传的 ISO = /root/project/installer/output/Yaxiang-OS-V0.3-dev-x86_64-installer.iso
+[2026-07-26 12:53:36] 上传后重新下载的 SHA256 验证需在 --upload 后执行
+[2026-07-26 12:53:36] 
+[2026-07-26 12:53:36] ==========================================
+[2026-07-26 12:53:36] 独立复核完成
+[2026-07-26 12:53:36] 失败项: 2
+[2026-07-26 12:53:36] 日志目录: /root/project/installer/output/verify-final
+[2026-07-26 12:53:36] ==========================================
+total 154308
+drwxr-xr-x  4 root root      4096 Jul 26 12:53 .
+drwxr-xr-x 17 root root      4096 Jul 26 12:46 ..
+-rw-r--r--  1 root root     29284 Jul 26 12:48 01-bios-boot.log
+-rw-r--r--  1 root root      5058 Jul 26 12:50 02-uefi-boot.log
+-rw-r--r--  1 root root     35939 Jul 26 12:50 03-full-install.log
+-rw-r--r--  1 root root     27977 Jul 26 12:52 04-installed-boot.log
+-rw-r--r--  1 root root       167 Jul 26 12:52 05-network.log
+-rw-r--r--  1 root root       236 Jul 26 12:53 07-sha256.log
+drwxr-xr-x 16 root root      4096 Jul 26 12:50 auto-install-initrd
+-rw-r--r--  1 root root  31099931 Jul 26 12:50 auto-install-initrd.img
+-rw-r--r--  1 root root 126681088 Jul 26 12:51 install-target.qcow2
+drwxr-xr-x  7 root root      4096 Jul 26 12:50 iso-extract
+-rw-r--r--  1 root root    131072 Jul 26 12:48 ovmf-vars.fd
+-rw-r--r--  1 root root     21861 Jul 26 12:53 verification.log
+[2026-07-26 12:53:36] [结论] 存在 2 项失败, 禁止发布

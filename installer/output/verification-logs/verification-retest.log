@@ -1,0 +1,84 @@
+[2026-07-26 13:01:37] ========== RETEST: UEFI + Network + Web ==========
+[2026-07-26 13:01:40] ISO SHA256: 2a9ff44e76241db748048275262509fd635803a4f7008b6e08ba6aa08e6cf3e0
+[2026-07-26 13:01:40] 
+[2026-07-26 13:01:40] ========== 2. uefi_boot_test (retest) ==========
+[2026-07-26 13:01:40] QEMU 命令: qemu-system-x86_64 -m 2048 -no-reboot -display none -serial stdio -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE.fd -drive if=pflash,format=raw,file=/root/project/installer/output/verify-final/ovmf-vars-retest.fd -cdrom /root/project/installer/output/Yaxiang-OS-V0.3-dev-x86_64-installer.iso -boot d
+[2026-07-26 13:03:40] QEMU 退出码: 124
+[2026-07-26 13:03:40] 日志大小: 35524 bytes, 501 行
+[2026-07-26 13:03:40] [PASS] uefi_boot: UEFI 固件识别 CD-ROM
+[2026-07-26 13:03:40] [PASS] uefi_boot: GRUB 启动
+[2026-07-26 13:03:40] [PASS] uefi_boot: Linux 内核启动
+[2026-07-26 13:03:40] [PASS] uefi_boot: 无 'Could not find live media'
+[2026-07-26 13:03:40] --- UEFI 串口日志 (前 30 行) ---
+[2J[01;01H[=3h[2J[01;01HBdsDxe: loading Boot0001 "UEFI QEMU DVD-ROM QM00003 " from PciRoot(0x0)/Pci(0x1,0x1)/Ata(Secondary,Master,0x0)
+BdsDxe: starting Boot0001 "UEFI QEMU DVD-ROM QM00003 " from PciRoot(0x0)/Pci(0x1,0x1)/Ata(Secondary,Master,0x0)
+[H[J[1;1H[?25l[m[H[J[1;1H[2;30HGNU GRUB  version 2.06
+
+[m[4;2H+----------------------------------------------------------------------------+[5;2H|[5;79H|[6;2H|[6;79H|[7;2H|[7;79H|[8;2H|[8;79H|[9;2H|[9;79H|[10;2H|[10;79H|[11;2H|[11;79H|[12;2H|[12;79H|[13;2H|[13;79H|[14;2H|[14;79H|[15;2H|[15;79H|[16;2H|[16;79H|[17;2H+----------------------------------------------------------------------------+[m[18;2H[19;2H[m     Use the ^ and v keys to select which entry is highlighted.          
+      Press enter to boot the selected OS, `e' to edit the commands       
+      before booting or `c' for a command-line.                           [5;80H [7m[5;3H*???????? (Start Yaxiang Installer)                                         [m[5;78H[m[m[6;3H ?????? (Safe Graphics / Compatibility)                                     [m[6;78H[m[m[7;3H ?????? (Maintenance Shell)                                                 [m[7;78H[m[m[8;3H ?? (Reboot)                                                                [m[8;78H[m[m[9;3H ?? (Power Off)                                                             [m[9;78H[m[m[10;3H                                                                            [m[10;78H[m[m[11;3H                                                                            [m[11;78H[m[m[12;3H                                                                            [m[12;78H[m[m[13;3H                                                                            [m[13;78H[m[m[14;3H                                                                            [m[14;78H[m[m[15;3H                                                                            [m[15;78H[m[m[16;3H                                                                            [m[16;78H[m[16;80H [5;78H[22;1H   The highlighted entry will be executed automatically in 5s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 4s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 3s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 2s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 1s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 0s.                 [5;78H[?25h[H[J[1;1H[H[J[1;1H[    0.000000] Linux version 5.15.0-25-generic (buildd@ubuntu) (gcc (Ubuntu 11.2.0-19ubuntu1) 11.2.0, GNU ld (GNU Binutils for Ubuntu) 2.38) #25-Ubuntu SMP Wed Mar 30 15:54:22 UTC 2022 (Ubuntu 5.15.0-25.25-generic 5.15.30)
+[    0.000000] Command line: BOOT_IMAGE=/boot/vmlinuz boot=live console=tty1 console=ttyS0,115200n8
+[    0.000000] KERNEL supported cpus:
+[    0.000000]   Intel GenuineIntel
+[    0.000000]   AMD AuthenticAMD
+[    0.000000]   Hygon HygonGenuine
+[    0.000000]   Centaur CentaurHauls
+[    0.000000]   zhaoxin   Shanghai  
+[    0.000000] x86/fpu: x87 FPU will use FXSAVE
+[    0.000000] signal: max sigframe size: 1440
+[    0.000000] BIOS-provided physical RAM map:
+[    0.000000] BIOS-e820: [mem 0x0000000000000000-0x000000000009ffff] usable
+[    0.000000] BIOS-e820: [mem 0x0000000000100000-0x00000000007fffff] usable
+[    0.000000] BIOS-e820: [mem 0x0000000000800000-0x0000000000807fff] ACPI NVS
+[    0.000000] BIOS-e820: [mem 0x0000000000808000-0x000000000080afff] usable
+[    0.000000] BIOS-e820: [mem 0x000000000080b000-0x000000000080bfff] ACPI NVS
+[    0.000000] BIOS-e820: [mem 0x000000000080c000-0x000000000080ffff] usable
+[    0.000000] BIOS-e820: [mem 0x0000000000810000-0x00000000008fffff] ACPI NVS
+[    0.000000] BIOS-e820: [mem 0x0000000000900000-0x000000007eed8fff] usable
+[    0.000000] BIOS-e820: [mem 0x000000007eed9000-0x000000007ef99fff] reserved
+[    0.000000] BIOS-e820: [mem 0x000000007ef9a000-0x000000007f8eefff] usable
+[    0.000000] BIOS-e820: [mem 0x000000007f8ef000-0x000000007fb6efff] reserved
+[    0.000000] BIOS-e820: [mem 0x000000007fb6f000-0x000000007fb7efff] ACPI data
+[    0.000000] BIOS-e820: [mem 0x000000007fb7f000-0x000000007fbfefff] ACPI NVS
+[2026-07-26 13:03:40] 
+[2026-07-26 13:03:40] ========== 5+6. network_test + web_test (retest) ==========
+[2026-07-26 13:03:40] QEMU 命令: qemu-system-x86_64 -m 1024 -display none -serial stdio -drive file=/root/project/installer/output/verify-final/install-target.qcow2,if=virtio,format=qcow2 -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22,hostfwd=tcp:127.0.0.1:18080-:80 -device virtio-net-pci,netdev=net0
+[2026-07-26 13:03:40] QEMU PID: 148434
+[2026-07-26 13:03:40] 等待 SSH (最多 60 秒)...
+[2026-07-26 13:06:00] [FAIL] network_test: SSH 超时
+[2026-07-26 13:06:00] [FAIL] web_test: SSH 超时
+[2026-07-26 13:06:00] 串口日志最后 30 行:
+[   11.062133] loop0: detected capacity change from 212992 to 199424
+[   11.110325] EXT4-fs (loop0): recovery complete
+[   11.117262] EXT4-fs (loop0): mounted filesystem cefe4fff-7e01-478f-a6c1-49ea4d8e98ae r/w with ordered data mode. Quota mode: disabled.
+[   11.129252] mount_root: switching to ext4 overlay
+[   11.159044] overlayfs: null uuid detected in lower fs '/', falling back to xino=off,index=off,nfs_export=off.
+[   11.880188] EXT4-fs (vda1): warning: mounting unchecked fs, running e2fsck is recommended
+[   11.887854] EXT4-fs (vda1): mounted filesystem 84173db5-fa99-e35a-95c6-28613cc79ea9 r/w without journal. Quota mode: disabled.
+[   11.912914] urandom-seed: Seeding with /etc/urandom.seed
+[   12.081428] procd: - early -
+[   12.807688] procd: - ubus -
+[   12.988996] procd: - init -
+Please press Enter to activate this console.
+[   14.338680] urngd: v1.0.2 started.
+[   14.783272] kmodloader: loading kernel modules from /etc/modules.d/*
+[   14.839129] e1000: Intel(R) PRO/1000 Network Driver
+[   14.841653] e1000: Copyright (c) 1999-2006 Intel Corporation.
+[   14.856123] ixgbe: Intel(R) 10 Gigabit PCI Express Network Driver
+[   14.858586] ixgbe: Copyright (c) 1999-2016 Intel Corporation.
+[   14.881723] i2c_dev: i2c /dev entries driver
+[   15.003046] PPP generic driver version 2.4.2
+[   15.013192] NET: Registered PF_PPPOX protocol family
+[   15.341958] kmodloader: done loading kernel modules from /etc/modules.d/*
+[   25.457022] 8021q: adding VLAN 0 to HW filter on device eth0
+[   25.521425] br-lan: port 1(eth0) entered blocking state
+[   25.524206] br-lan: port 1(eth0) entered disabled state
+[   25.526803] virtio_net virtio0 eth0: entered allmulticast mode
+[   25.530888] virtio_net virtio0 eth0: entered promiscuous mode
+[   26.420322] br-lan: port 1(eth0) entered blocking state
+[   26.422915] br-lan: port 1(eth0) entered forwarding state
+qemu-system-x86_64: terminating on signal 15 from pid 148434 (timeout)
+[2026-07-26 13:06:03] 
+[2026-07-26 13:06:03] ==========================================
+[2026-07-26 13:06:03] Retest 完成, 失败项: 2
+[2026-07-26 13:06:03] ==========================================

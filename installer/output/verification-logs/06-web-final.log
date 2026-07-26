@@ -1,0 +1,11 @@
+ 2160 root      1212 S    /usr/sbin/uhttpd -f -h /www -r Yaxiang-Gateway -x /c
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name    
+tcp        0      0 0.0.0.0:80              0.0.0.0:*               LISTEN      2160/uhttpd
+tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      1639/dropbear
+tcp        0      0 127.0.0.1:53            0.0.0.0:*               LISTEN      1550/dnsmasq
+tcp        0      0 10.0.2.15:53            0.0.0.0:*               LISTEN      1550/dnsmasq
+tcp        0      0 :::80                   :::*                    LISTEN      2160/uhttpd
+tcp        0      0 :::22                   :::*                    LISTEN      1639/dropbear
+tcp        0      0 ::1:53                  :::*                    LISTEN      1550/dnsmasq
+tcp        0      0 fe80::5054:ff:fe12:3456:53 :::*                    LISTEN      1550/dnsmasq
