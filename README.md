@@ -1,11 +1,17 @@
 # 亚象网络操作系统（Yaxiang OS）
 
-## 当前版本：YX OS 1.0（v0.3-dev 开发测试版）
+## 当前版本：Yaxiang OS V0.3-dev（开发测试版）
 
 ### 系统镜像下载
 
 - [点击下载 x86_64 安装镜像](https://github.com/antusheng-max/yaxiang-os/releases/download/v0.3-dev/Yaxiang-OS-V0.3-dev-x86_64-installer.iso)
 - [查看全部下载文件及 SHA256 校验](https://github.com/antusheng-max/yaxiang-os/releases/tag/v0.3-dev)
+
+最终 ISO SHA256：
+
+```
+cb4d479aacab6bc678010f25517ce1e905d4b62d4944ec94ac65140d40a06cc0
+```
 
 > 当前版本为开发测试版，请先在虚拟机或隔离环境中测试，不建议直接用于生产环境。
 
@@ -29,7 +35,7 @@
 
 ## 当前版本
 
-**V0.3-dev** (开发测试版)
+**Yaxiang OS V0.3-dev**（开发测试版）
 
 - 真实功能完成率: 94% (47/50)
 - 后端rpcd端点: 122个 (7个rpcd脚本)
@@ -132,4 +138,6 @@ cd installer
 
 ## 许可证
 
-私有项目，未经授权不得分发。
+本仓库公开提供 Yaxiang OS 开发测试版的源代码与系统镜像。
+亚象自研代码及资源版权归项目作者所有；OpenWrt 及其他第三方组件遵循各自的开源许可证。
+正式许可证与第三方许可清单请参阅 LICENSE 和 NOTICE 文件。
