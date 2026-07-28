@@ -1,66 +1,69 @@
 #!/bin/sh
-# Yaxiang OS First Boot Configuration
-# Idempotent - safe to run multiple times
-# Exits on error
+# Yaxiang OS first-boot defaults.
+# This script must complete successfully so OpenWrt removes it after first boot.
 
-set -e
+set -eu
 
-# Skip if already applied
-[ -f /etc/yaxiang-firstboot-applied ] && exit 0
+DEFAULTS_MARKER=/etc/yaxiang-defaults-applied
 
-echo "[yaxiang-defaults] Applying first-boot configuration..."
+[ -f "$DEFAULTS_MARKER" ] && exit 0
 
-# ===== Hostname =====
+echo "[yaxiang-defaults] applying first-boot configuration"
+
+# Set the factory hostname once. Subsequent changes are owned by UCI and must
+# never be overwritten by this defaults script.
 uci set system.@system[0].hostname='Yaxiang-Gateway'
+uci set system.@system[0].timezone='CST-8'
+uci set system.@system[0].zonename='Asia/Shanghai'
+uci commit system
+printf '%s\n' 'Yaxiang-Gateway' > /etc/hostname
 
-# ===== LAN Configuration =====
-# Set LAN IPv4 to 192.168.1.1/24
 uci set network.lan.proto='static'
 uci set network.lan.ipaddr='192.168.1.1'
 uci set network.lan.netmask='255.255.255.0'
-uci delete network.lan.ip6assign 2>/dev/null || true
+uci -q delete network.lan.ip6assign || true
 
-# ===== DHCP =====
+# The generic x86 image creates only LAN.  Define an explicit second-NIC WAN
+# so DHCP, routing and the firewall's wan zone are exercised and enforced.
+uci -q delete network.wan || true
+uci set network.wan='interface'
+uci set network.wan.device='eth1'
+uci set network.wan.proto='dhcp'
+uci -q delete network.wan6 || true
+uci set network.wan6='interface'
+uci set network.wan6.device='eth1'
+uci set network.wan6.proto='dhcpv6'
+uci commit network
+
 uci set dhcp.lan.ignore='0'
 uci set dhcp.lan.start='100'
 uci set dhcp.lan.limit='150'
 uci set dhcp.lan.leasetime='12h'
+uci commit dhcp
 
-# ===== uHTTPd =====
-uci set uhttpd.main.listen_http='0.0.0.0:80' '[::]:80'
-uci set uhttpd.main.home='/www'
-uci set uhttpd.main.index_page='index.html'
+# A stable named rule prevents duplicate rules if a boot is interrupted.
+uci -q delete firewall.yaxiang_wan_management || true
+uci set firewall.yaxiang_wan_management='rule'
+uci set firewall.yaxiang_wan_management.name='Reject-WAN-Management'
+uci set firewall.yaxiang_wan_management.src='wan'
+uci set firewall.yaxiang_wan_management.dest_port='22 80 443'
+uci set firewall.yaxiang_wan_management.proto='tcp'
+uci set firewall.yaxiang_wan_management.target='REJECT'
+uci commit firewall
 
-# ===== Security: Disable WAN-side Web and SSH =====
-# uHTTPd RFC1918 filter (already enabled by default)
-uci set uhttpd.main.rfc1918_filter='1'
+mkdir -p /etc/yaxiang /var/run/yaxiang /var/log/yaxiang
 
-# Dropbear (SSH) - configure to listen on LAN only
-uci set dropbear.@dropbear[0].Interface='lan' 2>/dev/null || true
+# An image ships with an empty root password. Until initialization succeeds,
+# expose only the HTTPS setup page and keep remote management daemons disabled.
+/etc/init.d/dropbear disable
+/etc/init.d/dropbear stop 2>/dev/null || true
+/etc/init.d/rpcd disable
+/etc/init.d/rpcd stop 2>/dev/null || true
 
-# ===== Firewall: Block WAN access to management =====
-# Add firewall rule to reject WAN -> device management ports
-uci add firewall rule
-uci set firewall.@rule[-1].name='Reject-WAN-Management'
-uci set firewall.@rule[-1].src='wan'
-uci set firewall.@rule[-1].dest_port='22 80 443'
-uci set firewall.@rule[-1].proto='tcp'
-uci set firewall.@rule[-1].target='REJECT'
+/etc/init.d/yaxiang-security-gate enable
+/usr/sbin/yaxiang-security-gate-apply
+/etc/init.d/uhttpd enable
 
-# ===== Timezone =====
-uci set system.@system[0].timezone='CST-8'
-uci set system.@system[0].zonename='Asia/Shanghai'
-
-# ===== Create Yaxiang directories =====
-mkdir -p /etc/yaxiang
-mkdir -p /var/run/yaxiang
-mkdir -p /var/log/yaxiang
-
-# ===== Commit all changes =====
-uci commit
-
-# ===== Mark as applied =====
-touch /etc/yaxiang-firstboot-applied
-
-echo "[yaxiang-defaults] First-boot configuration applied successfully."
+touch "$DEFAULTS_MARKER"
+echo "[yaxiang-defaults] first-boot configuration complete"
 exit 0

@@ -1,0 +1,12 @@
+#!/bin/sh /etc/rc.common
+
+START=18
+STOP=89
+
+start() {
+	/usr/sbin/yaxiang-security-gate-apply
+}
+
+reload() {
+	/usr/sbin/yaxiang-security-gate-apply
+}

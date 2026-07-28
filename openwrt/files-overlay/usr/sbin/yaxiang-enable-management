@@ -1,0 +1,21 @@
+#!/bin/sh
+# Enable the LAN management plane only after a non-empty root password exists.
+
+set -eu
+
+hash="$(awk -F: '$1 == "root" { print $2; exit }' /etc/shadow)"
+case "$hash" in
+	""|"!"|"*"|"x")
+		echo "ERROR: root password is not set; management remains disabled" >&2
+		exit 1
+		;;
+esac
+
+touch /etc/yaxiang-initialized
+/usr/sbin/yaxiang-security-gate-apply
+
+/etc/init.d/rpcd start
+/etc/init.d/dropbear start
+/etc/init.d/uhttpd restart
+
+echo "LAN management enabled"

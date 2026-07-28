@@ -1,0 +1,61 @@
+#!/bin/sh
+
+json_reply() {
+	status="$1"
+	success="$2"
+	message="$3"
+	printf 'Status: %s\r\n' "$status"
+	printf 'Content-Type: application/json\r\n'
+	printf 'Cache-Control: no-store\r\n\r\n'
+	printf '{"success":%s,"message":"%s"}\n' "$success" "$message"
+}
+
+case "${REMOTE_ADDR:-}" in
+	192.168.1.*) ;;
+	*) json_reply '403 Forbidden' false '仅允许从 LAN 初始化'; exit 0 ;;
+esac
+
+[ "${REQUEST_METHOD:-}" = "POST" ] ||
+	{ json_reply '405 Method Not Allowed' false '仅允许 POST'; exit 0; }
+[ "${SERVER_PORT:-}" = "443" ] || [ "${HTTPS:-}" = "on" ] ||
+	{ json_reply '426 Upgrade Required' false '必须使用 HTTPS 初始化'; exit 0; }
+
+length="${CONTENT_LENGTH:-0}"
+case "$length" in *[!0-9]*|"") length=0 ;; esac
+[ "$length" -gt 0 ] && [ "$length" -le 1024 ] ||
+	{ json_reply '400 Bad Request' false '请求大小无效'; exit 0; }
+
+body="$(dd bs=1 count="$length" 2>/dev/null)"
+password="$(printf '%s' "$body" | jsonfilter -e '@.password' 2>/dev/null)"
+confirm="$(printf '%s' "$body" | jsonfilter -e '@.confirm' 2>/dev/null)"
+unset body
+
+[ "$password" = "$confirm" ] ||
+	{ json_reply '400 Bad Request' false '两次输入的密码不一致'; exit 0; }
+[ "${#password}" -ge 12 ] && [ "${#password}" -le 64 ] ||
+	{ json_reply '400 Bad Request' false '密码长度必须为 12 到 64 位'; exit 0; }
+printf '%s' "$password" | grep -q '[a-z]' &&
+printf '%s' "$password" | grep -q '[A-Z]' &&
+printf '%s' "$password" | grep -q '[0-9]' &&
+printf '%s' "$password" | grep -q '[^A-Za-z0-9]' &&
+! printf '%s' "$password" | grep -q '[[:space:][:cntrl:]]' ||
+	{ json_reply '400 Bad Request' false '密码必须包含大小写字母、数字和符号，且不得含空白'; exit 0; }
+
+if ! printf '%s\n%s\n' "$password" "$password" | passwd root >/dev/null 2>&1; then
+	unset password confirm
+	json_reply '500 Internal Server Error' false '密码保存失败'
+	exit 0
+fi
+unset password confirm
+
+hash="$(awk -F: '$1 == "root" { print $2; exit }' /etc/shadow)"
+case "$hash" in
+	""|"!"|"*"|"x")
+		json_reply '500 Internal Server Error' false '密码校验失败'
+		exit 0
+		;;
+esac
+
+# Return the response before restarting the web server that owns this CGI.
+(sleep 1; /usr/sbin/yaxiang-enable-management) >/dev/null 2>&1 &
+json_reply '200 OK' true '初始化成功'

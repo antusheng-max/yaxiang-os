@@ -1,0 +1,60 @@
+#!/bin/sh
+# Enforce the management exposure policy on every boot.
+
+set -eu
+
+root_has_password() {
+	hash="$(awk -F: '$1 == "root" { print $2; exit }' /etc/shadow)"
+	[ -n "$hash" ] && [ "$hash" != "!" ] && [ "$hash" != "*" ] && [ "$hash" != "x" ]
+}
+
+configure_uhttpd_common() {
+	uci set uhttpd.main.enabled='1'
+	uci set uhttpd.main.rfc1918_filter='1'
+	uci set uhttpd.main.index_page='index.html'
+	uci set uhttpd.main.cgi_prefix='/cgi-bin'
+	uci set uhttpd.main.cert='/etc/uhttpd.crt'
+	uci set uhttpd.main.key='/etc/uhttpd.key'
+	uci -q delete uhttpd.main.listen_http || true
+	uci add_list uhttpd.main.listen_http='192.168.1.1:80'
+	uci -q delete uhttpd.main.listen_https || true
+	uci add_list uhttpd.main.listen_https='192.168.1.1:443'
+}
+
+configure_uhttpd_common
+
+if root_has_password && [ -f /etc/yaxiang-initialized ]; then
+	uci set uhttpd.main.home='/www'
+	uci set uhttpd.main.redirect_https='1'
+	uci set uhttpd.main.ubus_prefix='/ubus'
+	# The complete site is protected by the system root account. Ubus remains
+	# LAN-only behind this authentication boundary.
+	uci set uhttpd.main.no_ubusauth='1'
+	uci -q delete uhttpd.yaxiang_admin || true
+	uci set uhttpd.yaxiang_admin='httpauth'
+	uci set uhttpd.yaxiang_admin.prefix='/'
+	uci set uhttpd.yaxiang_admin.username='root'
+	uci set uhttpd.yaxiang_admin.password='$p$root'
+	uci -q delete uhttpd.main.httpauth || true
+	uci add_list uhttpd.main.httpauth='yaxiang_admin'
+
+	uci set dropbear.@dropbear[0].Interface='lan'
+	uci set dropbear.@dropbear[0].PasswordAuth='on'
+	uci set dropbear.@dropbear[0].RootPasswordAuth='on'
+	uci commit dropbear
+	/etc/init.d/rpcd enable
+	/etc/init.d/dropbear enable
+else
+	uci set uhttpd.main.home='/www-init'
+	uci set uhttpd.main.redirect_https='1'
+	uci -q delete uhttpd.main.ubus_prefix || true
+	uci -q delete uhttpd.main.no_ubusauth || true
+	uci -q delete uhttpd.main.httpauth || true
+	uci -q delete uhttpd.yaxiang_admin || true
+	/etc/init.d/dropbear disable
+	/etc/init.d/dropbear stop 2>/dev/null || true
+	/etc/init.d/rpcd disable
+	/etc/init.d/rpcd stop 2>/dev/null || true
+fi
+
+uci commit uhttpd

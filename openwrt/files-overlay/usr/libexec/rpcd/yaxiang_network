@@ -1,10 +1,6 @@
 #!/bin/sh
 # Yaxiang OS - Network API via rpcd/ubus
-# 真实网络信息端点 + 基础写入操作
-# 第六阶段A: 网络控制底座接入
-
-NETCTL="/usr/lib/yaxiang/netctl.sh"
-[ -f "$NETCTL" ] && . "$NETCTL"
+# Read-only network information endpoints
 
 case "$1" in
   list)
@@ -17,14 +13,6 @@ case "$1" in
   "network.dns": {},
   "network.link_status": {},
   "network.traffic_counters": {},
-  "network.physical_devices": {},
-  "network.device_info": {"interface":"iface"},
-  "network.interface_config": {"interface":"iface"},
-  "network.interface_ipv4": {"interface":"iface"},
-  "network.interface_ipv6": {"interface":"iface"},
-  "network.set_mtu": {"interface":"iface","mtu":"1500"},
-  "network.set_description": {"interface":"iface","description":"note"},
-  "network.set_link_state": {"interface":"iface","state":"up"},
   "lines.status": {}
 }
 EOF
@@ -107,124 +95,6 @@ EOF
         done
         RESULT="${RESULT}]"
         echo "{\"lines\":${RESULT}}"
-        ;;
-
-      network.physical_devices)
-        # 真实物理网卡列表
-        RESULT="["
-        FIRST=1
-        for iface in $(ls /sys/class/net/ 2>/dev/null | grep -v lo); do
-          MAC=$(cat /sys/class/net/$iface/address 2>/dev/null || echo "")
-          MTU=$(cat /sys/class/net/$iface/mtu 2>/dev/null || echo "0")
-          OPERSTATE=$(cat /sys/class/net/$iface/operstate 2>/dev/null || echo "unknown")
-          CARRIER=$(cat /sys/class/net/$iface/carrier 2>/dev/null || echo "0")
-          TYPE=$(cat /sys/class/net/$iface/type 2>/dev/null || echo "0")
-          # 判断是否物理网卡
-          IS_PHYSICAL="false"
-          [ -d "/sys/class/net/$iface/device" ] && IS_PHYSICAL="true"
-          [ $FIRST -eq 0 ] && RESULT="${RESULT},"
-          RESULT="${RESULT}{\"name\":\"${iface}\",\"mac\":\"${MAC}\",\"mtu\":${MTU},\"state\":\"${OPERSTATE}\",\"carrier\":${CARRIER},\"physical\":${IS_PHYSICAL}}"
-          FIRST=0
-        done
-        RESULT="${RESULT}]"
-        echo "{\"devices\":${RESULT}}"
-        ;;
-
-      network.device_info)
-        # 单个网卡详细信息
-        read -r input
-        IFACE=$(echo "$input" | jsonfilter -e '@.interface' 2>/dev/null)
-        if [ -z "$IFACE" ] || [ ! -d "/sys/class/net/${IFACE}" ]; then
-          echo '{"success":false,"error":"interface not found"}'
-        else
-          MAC=$(cat /sys/class/net/$IFACE/address 2>/dev/null || echo "")
-          MTU=$(cat /sys/class/net/$IFACE/mtu 2>/dev/null || echo "0")
-          OPERSTATE=$(cat /sys/class/net/$IFACE/operstate 2>/dev/null || echo "unknown")
-          CARRIER=$(cat /sys/class/net/$IFACE/carrier 2>/dev/null || echo "0")
-          SPEED=$(cat /sys/class/net/$IFACE/speed 2>/dev/null || echo "-1")
-          DUPLEX=$(cat /sys/class/net/$IFACE/duplex 2>/dev/null || echo "unknown")
-          # UCI备注
-          DESC=$(uci get network.${IFACE}.description 2>/dev/null || echo "")
-          echo "{\"name\":\"${IFACE}\",\"mac\":\"${MAC}\",\"mtu\":${MTU},\"state\":\"${OPERSTATE}\",\"carrier\":${CARRIER},\"speed_mbps\":${SPEED},\"duplex\":\"${DUPLEX}\",\"description\":\"${DESC}\"}"
-        fi
-        ;;
-
-      network.interface_config)
-        # UCI接口配置
-        read -r input
-        IFACE=$(echo "$input" | jsonfilter -e '@.interface' 2>/dev/null)
-        if [ -z "$IFACE" ]; then
-          echo '{"success":false,"error":"interface required"}'
-        else
-          PROTO=$(uci get network.${IFACE}.proto 2>/dev/null || echo "none")
-          DEVICE=$(uci get network.${IFACE}.device 2>/dev/null || echo "")
-          IPADDR=$(uci get network.${IFACE}.ipaddr 2>/dev/null || echo "")
-          NETMASK=$(uci get network.${IFACE}.netmask 2>/dev/null || echo "")
-          GATEWAY=$(uci get network.${IFACE}.gateway 2>/dev/null || echo "")
-          MTU=$(uci get network.${IFACE}.mtu 2>/dev/null || echo "")
-          echo "{\"interface\":\"${IFACE}\",\"proto\":\"${PROTO}\",\"device\":\"${DEVICE}\",\"ipaddr\":\"${IPADDR}\",\"netmask\":\"${NETMASK}\",\"gateway\":\"${GATEWAY}\",\"mtu\":\"${MTU}\"}"
-        fi
-        ;;
-
-      network.interface_ipv4)
-        # 接口IPv4地址
-        read -r input
-        IFACE=$(echo "$input" | jsonfilter -e '@.interface' 2>/dev/null)
-        if [ -z "$IFACE" ]; then
-          echo '{"success":false,"error":"interface required"}'
-        else
-          ADDR=$(ip -4 addr show dev "$IFACE" 2>/dev/null | grep inet | awk '{print $2}' | head -1)
-          echo "{\"interface\":\"${IFACE}\",\"ipv4\":\"${ADDR:-}\"}"
-        fi
-        ;;
-
-      network.interface_ipv6)
-        # 接口IPv6地址
-        read -r input
-        IFACE=$(echo "$input" | jsonfilter -e '@.interface' 2>/dev/null)
-        if [ -z "$IFACE" ]; then
-          echo '{"success":false,"error":"interface required"}'
-        else
-          ADDR=$(ip -6 addr show dev "$IFACE" scope global 2>/dev/null | grep inet6 | awk '{print $2}' | head -1)
-          LLADDR=$(ip -6 addr show dev "$IFACE" scope link 2>/dev/null | grep inet6 | awk '{print $2}' | head -1)
-          echo "{\"interface\":\"${IFACE}\",\"ipv6_global\":\"${ADDR:-}\",\"ipv6_link_local\":\"${LLADDR:-}\"}"
-        fi
-        ;;
-
-      network.set_mtu)
-        # 修改MTU (写入)
-        read -r input
-        IFACE=$(echo "$input" | jsonfilter -e '@.interface' 2>/dev/null)
-        MTU=$(echo "$input" | jsonfilter -e '@.mtu' 2>/dev/null)
-        if [ -f "$NETCTL" ]; then
-          netctl_set_mtu "$IFACE" "$MTU"
-        else
-          echo '{"success":false,"error":"netctl not available"}'
-        fi
-        ;;
-
-      network.set_description)
-        # 修改网卡备注 (写入)
-        read -r input
-        IFACE=$(echo "$input" | jsonfilter -e '@.interface' 2>/dev/null)
-        DESC=$(echo "$input" | jsonfilter -e '@.description' 2>/dev/null)
-        if [ -f "$NETCTL" ]; then
-          netctl_set "network" "$IFACE" "description" "$DESC"
-        else
-          echo '{"success":false,"error":"netctl not available"}'
-        fi
-        ;;
-
-      network.set_link_state)
-        # 启用/停用接口 (写入)
-        read -r input
-        IFACE=$(echo "$input" | jsonfilter -e '@.interface' 2>/dev/null)
-        STATE=$(echo "$input" | jsonfilter -e '@.state' 2>/dev/null)
-        if [ -f "$NETCTL" ]; then
-          netctl_set_link_state "$IFACE" "$STATE"
-        else
-          echo '{"success":false,"error":"netctl not available"}'
-        fi
         ;;
 
       *)

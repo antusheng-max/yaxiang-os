@@ -1,0 +1,24 @@
+{
+  "yaxiang-system2": {
+    "description": "Yaxiang OS authenticated system settings",
+    "read": {
+      "ubus": {
+        "yaxiang_system2": [
+          "sys.info",
+          "sys.hostname_get",
+          "sys.timezone_get"
+        ]
+      },
+      "uci": [ "system" ]
+    },
+    "write": {
+      "ubus": {
+        "yaxiang_system2": [
+          "sys.hostname_set",
+          "sys.timezone_set"
+        ]
+      },
+      "uci": [ "system" ]
+    }
+  }
+}

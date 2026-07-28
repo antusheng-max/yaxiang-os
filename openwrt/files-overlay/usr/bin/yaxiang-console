@@ -142,8 +142,27 @@ reset_password() {
     return 1
   fi
 
-  echo "$NEW_PASS" | passwd root
-  echo -e "${GREEN}密码已重置${NC}"
+  if [ "${#NEW_PASS}" -lt 12 ] ||
+     ! printf '%s' "$NEW_PASS" | grep -q '[a-z]' ||
+     ! printf '%s' "$NEW_PASS" | grep -q '[A-Z]' ||
+     ! printf '%s' "$NEW_PASS" | grep -q '[0-9]' ||
+     ! printf '%s' "$NEW_PASS" | grep -q '[^A-Za-z0-9]' ||
+     printf '%s' "$NEW_PASS" | grep -q '[[:space:][:cntrl:]]'; then
+    echo -e "${RED}错误: 密码须至少12位并包含大小写字母、数字和符号，且不得含空白${NC}"
+    return 1
+  fi
+
+  if ! printf '%s\n%s\n' "$NEW_PASS" "$NEW_PASS" | passwd root >/dev/null 2>&1; then
+    unset NEW_PASS CONFIRM_PASS
+    echo -e "${RED}错误: 密码保存失败${NC}"
+    return 1
+  fi
+  unset NEW_PASS CONFIRM_PASS
+
+  if [ -x /usr/sbin/yaxiang-enable-management ]; then
+    /usr/sbin/yaxiang-enable-management
+  fi
+  echo -e "${GREEN}密码已保存，LAN 管理服务已启用${NC}"
 }
 
 network_diagnostic() {

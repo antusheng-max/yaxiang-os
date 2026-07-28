@@ -25,8 +25,10 @@ define Package/yaxiang-api/install
 	$(INSTALL_DIR) $(1)/usr/libexec/rpcd
 	$(INSTALL_BIN) ./files/usr/libexec/rpcd/yaxiang_system $(1)/usr/libexec/rpcd/yaxiang_system
 	$(INSTALL_BIN) ./files/usr/libexec/rpcd/yaxiang_network $(1)/usr/libexec/rpcd/yaxiang_network
+	$(INSTALL_BIN) ./files/usr/libexec/rpcd/yaxiang_system2 $(1)/usr/libexec/rpcd/yaxiang_system2
 	$(INSTALL_DIR) $(1)/usr/share/rpcd/acl.d
 	$(INSTALL_DATA) ./files/usr/share/rpcd/acl.d/yaxiang.json $(1)/usr/share/rpcd/acl.d/yaxiang.json
+	$(INSTALL_DATA) ./files/usr/share/rpcd/acl.d/yaxiang-system2.json $(1)/usr/share/rpcd/acl.d/yaxiang-system2.json
 endef
 
 $(eval $(call BuildPackage,yaxiang-api))
