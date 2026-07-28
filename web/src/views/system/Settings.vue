@@ -24,7 +24,9 @@
               <el-form-item label="HTTPS">
                 <el-switch v-model="config.https" />
               </el-form-item>
-              <el-form-item><el-button type="primary" @click="ElMessage.success('保存成功')">保存并应用</el-button></el-form-item>
+              <el-form-item>
+                <el-button type="primary" :loading="saving" @click="saveSettings">保存并应用</el-button>
+              </el-form-item>
             </el-form>
           </SectionCard>
     </SectionCard>
@@ -32,10 +34,12 @@
 </template>
 
 <script setup>
-import { reactive } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import api from '../../api/index.js'
 import BRAND from '../../config/brand.js'
 
+const saving = ref(false)
 const config = reactive({
   hostname: BRAND.gatewayName,
   timezone: 'CST-8',
@@ -44,4 +48,39 @@ const config = reactive({
   webPort: 80,
   https: false,
 })
+
+function unwrap(response) {
+  if (!response?.implemented || !response.data?.success) {
+    throw new Error(response?.data?.message || response?.reason || '后端操作失败')
+  }
+  return response.data.data
+}
+
+async function loadSettings() {
+  try {
+    const [hostname, timezone] = await Promise.all([
+      api.system.getHostname(),
+      api.system.getTimezone(),
+    ])
+    config.hostname = unwrap(hostname).hostname
+    config.timezone = unwrap(timezone).timezone
+  } catch (error) {
+    ElMessage.error(`读取系统设置失败：${error.message}`)
+  }
+}
+
+async function saveSettings() {
+  saving.value = true
+  try {
+    unwrap(await api.system.setHostname(config.hostname.trim()))
+    unwrap(await api.system.setTimezone(config.timezone))
+    ElMessage.success('设置已提交并应用')
+  } catch (error) {
+    ElMessage.error(`保存失败：${error.message}`)
+  } finally {
+    saving.value = false
+  }
+}
+
+onMounted(loadSettings)
 </script>
