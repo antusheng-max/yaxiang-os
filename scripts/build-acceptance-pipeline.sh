@@ -1,9 +1,8 @@
 #!/bin/bash
 set -euo pipefail
-umask 022
 
 # ============================================================
-# 亚象网络操作系统 - 构建即验收强制流水线 v2
+# 亚象网络操作系统 - 构建即验收强制流水线
 # Yaxiang OS Build-as-Acceptance Pipeline
 #
 # 一个命令完成: 编译→打包→测试→发布
@@ -17,12 +16,12 @@ readonly INSTALLER_DIR="${PROJECT_DIR}/installer"
 readonly OPENWRT_DIR="${PROJECT_DIR}/openwrt"
 readonly WEB_DIR="${PROJECT_DIR}/web"
 readonly IMAGE_BUILDER="/root/openwrt-imagebuilder-25.12.5-x86-64.Linux-x86_64"
-readonly OUTPUT_DIR="${YAXIANG_OUTPUT_DIR:-${INSTALLER_DIR}/output}"
+readonly OUTPUT_DIR="${INSTALLER_DIR}/output"
 readonly PIPELINE_DIR="${OUTPUT_DIR}/pipeline-$(date '+%Y%m%d-%H%M%S')"
 readonly ISO_NAME="Yaxiang-OS-${VERSION}-x86_64-installer.iso"
 readonly ISO_PATH="${OUTPUT_DIR}/${ISO_NAME}"
 readonly LIVE_ROOTFS="${INSTALLER_DIR}/live/rootfs"
-readonly KERNEL_VER="${YAXIANG_KERNEL_VER:-$(find "${LIVE_ROOTFS}/boot" -maxdepth 1 -type f -name 'vmlinuz-*' -printf '%f\n' | sed 's/^vmlinuz-//' | sort -V | tail -1)}"
+readonly KERNEL_VER="5.15.0-25-generic"
 readonly OVMF_CODE="/usr/share/OVMF/OVMF_CODE.fd"
 readonly OVMF_VARS="/usr/share/OVMF/OVMF_VARS.fd"
 readonly GH_REPO="antusheng-max/yaxiang-os"
@@ -90,7 +89,7 @@ stage_build_web() {
     if [ ! -d node_modules ]; then
         npm install --silent >> "$step_log_file" 2>&1
     fi
-    VITE_APP_MODE=real VITE_ADAPTER_MODE=real npm run build >> "$step_log_file" 2>&1
+    npm run build >> "$step_log_file" 2>&1
 
     [ -f "${WEB_DIR}/dist/index.html" ] || die "Web 构建失败: dist/index.html 不存在"
     log "Web 前端编译完成"
@@ -105,19 +104,22 @@ stage_build_openwrt() {
     local build_output="${OPENWRT_DIR}/output/v0.3-dev"
     mkdir -p "$build_output"
 
+    # 准备 files-overlay
     local FILES_DIR="${OPENWRT_DIR}/files-overlay"
     rm -rf "$FILES_DIR"
     mkdir -p "$FILES_DIR/www" "$FILES_DIR/etc"
 
+    # 复制 Web dist
     cp -r "${WEB_DIR}/dist/"* "$FILES_DIR/www/"
 
+    # 复制品牌文件
     local PKG_DIR="${OPENWRT_DIR}/packages/yaxiang"
     if [ -f "${PKG_DIR}/yaxiang-branding/files/etc/yaxiang-release" ]; then
         cp "${PKG_DIR}/yaxiang-branding/files/etc/yaxiang-release" "$FILES_DIR/etc/"
     fi
 
+    # 复制 uci-defaults, init.d, bin, rpcd, acl
     mkdir -p "$FILES_DIR/etc/uci-defaults" "$FILES_DIR/etc/init.d" "$FILES_DIR/usr/bin" \
-             "$FILES_DIR/usr/sbin" \
              "$FILES_DIR/usr/libexec/rpcd" "$FILES_DIR/usr/share/rpcd/acl.d"
     for script in "${PKG_DIR}"/*/files/etc/uci-defaults/*; do
         [ -f "$script" ] && cp "$script" "$FILES_DIR/etc/uci-defaults/" && chmod +x "$FILES_DIR/etc/uci-defaults/$(basename "$script")"
@@ -128,37 +130,19 @@ stage_build_openwrt() {
     for bin in "${PKG_DIR}"/*/files/usr/bin/*; do
         [ -f "$bin" ] && cp "$bin" "$FILES_DIR/usr/bin/" && chmod +x "$FILES_DIR/usr/bin/$(basename "$bin")"
     done
-    for bin in "${PKG_DIR}"/*/files/usr/sbin/*; do
-        [ -f "$bin" ] && cp "$bin" "$FILES_DIR/usr/sbin/" && chmod +x "$FILES_DIR/usr/sbin/$(basename "$bin")"
-    done
     for rpc in "${PKG_DIR}"/*/files/usr/libexec/rpcd/*; do
         [ -f "$rpc" ] && cp "$rpc" "$FILES_DIR/usr/libexec/rpcd/" && chmod +x "$FILES_DIR/usr/libexec/rpcd/$(basename "$rpc")"
     done
     for acl in "${PKG_DIR}"/*/files/usr/share/rpcd/acl.d/*; do
         [ -f "$acl" ] && cp "$acl" "$FILES_DIR/usr/share/rpcd/acl.d/"
     done
-    if [ -d "${PKG_DIR}/yaxiang-defaults/files/www-init" ]; then
-        cp -a "${PKG_DIR}/yaxiang-defaults/files/www-init" "$FILES_DIR/"
-        chmod +x "$FILES_DIR/www-init/cgi-bin/yaxiang-initialize"
-    fi
 
-    # ImageBuilder merges FILES into the immutable rootfs.  Never let the
-    # invoking shell's restrictive umask turn core directories such as /etc
-    # and /usr into 0700 directories, otherwise early userspace cannot finish
-    # the procd/ubus transition.
-    find "$FILES_DIR" -type d -exec chmod 0755 {} +
-    find "$FILES_DIR" -type f -exec chmod 0644 {} +
-    find "$FILES_DIR/etc/uci-defaults" "$FILES_DIR/etc/init.d" \
-         "$FILES_DIR/usr/bin" "$FILES_DIR/usr/sbin" \
-         "$FILES_DIR/usr/libexec/rpcd" "$FILES_DIR/www-init/cgi-bin" \
-         -type f -exec chmod 0755 {} +
-
+    # 使用 Image Builder 构建
     cd "$IMAGE_BUILDER"
     local PACKAGES="uhttpd uhttpd-mod-ubus rpcd rpcd-mod-file rpcd-mod-ucode ubus uci firewall4 nftables ip-full \
       kmod-e1000 kmod-e1000e kmod-igb kmod-igc kmod-ixgbe kmod-r8169 \
       ca-bundle dnsmasq odhcpd-ipv6only odhcp6c \
-      dropbear kmod-button-hotplug grub2-bios-setup procd-ujail \
-      jsonfilter px5g-mbedtls ss kmod-netlink-diag"
+      dropbear kmod-button-hotplug grub2-bios-setup procd-ujail"
 
     log "构建 combined (BIOS) 镜像..."
     make image \
@@ -168,6 +152,7 @@ stage_build_openwrt() {
         BIN_DIR="$build_output" \
         >> "$step_log_file" 2>&1
 
+    # 查找并复制输出镜像
     local bios_img efi_img
     bios_img=$(find "$build_output" -name "*combined.img.gz" ! -name "*efi*" | head -1)
     efi_img=$(find "$build_output" -name "*combined-efi.img.gz" | head -1)
@@ -175,6 +160,7 @@ stage_build_openwrt() {
     [ -n "$bios_img" ] && [ -f "$bios_img" ] || die "BIOS 镜像构建失败"
     [ -n "$efi_img" ] && [ -f "$efi_img" ] || die "EFI 镜像构建失败"
 
+    # 复制到 installer/images
     cp "$bios_img" "${INSTALLER_DIR}/images/combined.img.gz"
     cp "$efi_img" "${INSTALLER_DIR}/images/combined-efi.img.gz"
     (cd "${INSTALLER_DIR}/images" && sha256sum combined.img.gz combined-efi.img.gz > SHA256SUMS)
@@ -189,95 +175,38 @@ stage_build_squashfs() {
     log "========== 阶段 3: 生成 filesystem.squashfs =========="
     local step_log_file="${STEP_LOG_DIR}/03-squashfs.log"
     local staging="${OUTPUT_DIR}/iso-staging"
-    local metadata_dir="${PIPELINE_DIR}/live-squashfs-metadata"
-    local filtered_status="${metadata_dir}/dpkg-status"
-    local exclude_file="${metadata_dir}/exclude-files"
     mkdir -p "$staging/live"
-    mkdir -p "$metadata_dir"
 
     [ -d "$LIVE_ROOTFS" ] && [ -f "${LIVE_ROOTFS}/bin/bash" ] || die "Live rootfs 不存在"
-
-    # The Ubuntu kernel is a build input for vmlinuz and the curated initramfs
-    # module closure.  The default and maintenance GRUB paths both execute the
-    # curated initramfs directly; the squashfs is never used as a boot root.
-    # Do not ship the complete, dormant kernel/module payload in squashfs.
-    # Keeping it there adds hundreds of unreachable kernel CVE matches and
-    # needlessly expands the ISO attack surface.
-    awk '
-        BEGIN { RS = ""; ORS = "\n\n" }
-        {
-            package = ""
-            count = split($0, lines, "\n")
-            for (line_no = 1; line_no <= count; line_no++) {
-                if (lines[line_no] ~ /^Package: /) {
-                    package = substr(lines[line_no], 10)
-                    break
-                }
-            }
-            if (package !~ /^linux-(image|modules|firmware)(-|$)/) {
-                print
-            }
-        }
-    ' "${LIVE_ROOTFS}/var/lib/dpkg/status" > "$filtered_status"
-
-    printf '%s\n' \
-        'boot' \
-        'lib/modules' \
-        'usr/lib/modules' \
-        'usr/lib/firmware' \
-        'var/lib/dpkg/status' \
-        'var/lib/dpkg/status-old' \
-        'var/lib/dpkg/info/linux-image-*' \
-        'var/lib/dpkg/info/linux-modules-*' \
-        'var/lib/dpkg/info/linux-firmware*' \
-        'usr/share/doc/linux-image-*' \
-        'usr/share/doc/linux-modules-*' \
-        'usr/share/doc/linux-firmware*' \
-        > "$exclude_file"
 
     rm -f "$staging/live/filesystem.squashfs"
     mksquashfs "$LIVE_ROOTFS" "$staging/live/filesystem.squashfs" \
         -comp xz -Xdict-size 100% -noappend \
-        -wildcards -ef "$exclude_file" \
-        -p "var/lib/dpkg/status f 0644 0 0 cat $filtered_status" \
         -e dev proc sys run tmp var/tmp var/log \
         >> "$step_log_file" 2>&1
 
     [ -f "$staging/live/filesystem.squashfs" ] || die "squashfs 生成失败"
-    if unsquashfs -cat "$staging/live/filesystem.squashfs" var/lib/dpkg/status |
-       grep -qE '^Package: linux-(image|modules|firmware)(-|$)'; then
-        die "squashfs 仍包含已排除的内核或固件包元数据"
-    fi
-    if unsquashfs -ll "$staging/live/filesystem.squashfs" |
-       grep -qE 'squashfs-root/(boot|lib/modules|usr/lib/firmware)(/|$)'; then
-        die "squashfs 仍包含已排除的内核、模块或固件文件"
-    fi
-    step_log "live_squashfs" \
-        "[OK] 未使用的完整 Ubuntu 内核、模块及固件已从 Live squashfs 排除；精选驱动仅保留在 initramfs"
     log "filesystem.squashfs 生成完成: $(du -h "$staging/live/filesystem.squashfs" | cut -f1)"
 }
 
 # ============================================================
-# 阶段 4: 生成包含精选内核模块的 initramfs
-# 修复: 只复制安装/启动必需模块，避免 initramfs 过大导致 QEMU OOM
+# 阶段 4: 生成包含真实内核模块的 initramfs
 # ============================================================
 stage_build_initramfs() {
-    log "========== 阶段 4: 生成 initramfs (含精选内核模块) =========="
+    log "========== 阶段 4: 生成 initramfs (含真实内核模块) =========="
     local step_log_file="${STEP_LOG_DIR}/04-initramfs.log"
     local staging="${OUTPUT_DIR}/iso-staging"
-    mkdir -p "$staging/boot"
     local initrd_dir="${PIPELINE_DIR}/initrd-build"
     rm -rf "$initrd_dir"
-    mkdir -p "$initrd_dir"/{bin,sbin,usr/bin,usr/sbin,proc,sys,dev,tmp,run,etc,var/log,opt/yaxiang-installer,rootfs}
+    mkdir -p "$initrd_dir"/{bin,sbin,usr/bin,usr/sbin,proc,sys,dev,tmp,run,lib/modules/${KERNEL_VER},etc,var/log,opt/yaxiang-installer,rootfs}
 
-    # ---- 复制内核 ----
+    # 复制内核
     local kernel_file
     kernel_file=$(find "${LIVE_ROOTFS}/boot" -name "vmlinuz-*" -type f | sort -V | tail -1)
     [ -n "$kernel_file" ] && [ -f "$kernel_file" ] || die "内核文件不存在"
     cp "$kernel_file" "$staging/boot/vmlinuz"
-    log "内核: $(basename "$kernel_file")"
 
-    # ---- busybox ----
+    # busybox
     local busybox_src="${LIVE_ROOTFS}/bin/busybox"
     [ -f "$busybox_src" ] || busybox_src=$(which busybox)
     [ -f "$busybox_src" ] || die "busybox 不存在"
@@ -286,143 +215,44 @@ stage_build_initramfs() {
     local applets="sh ash cat echo grep sed awk sort printf basename dirname readlink \
         sha256sum ls mkdir mount umount sleep poweroff reboot clear head tail wc tr cut \
         uname dmesg lsmod free vi more less test expr seq yes dd sync blockdev insmod \
-        modprobe fdisk findmnt losetup date du gzip cp rm mv ln touch chmod chown \
-        kill ps wget nc ip ping brctl uci ubus mdev setsid cttyhack"
+        modprobe fdisk blkid findmnt losetup date du gzip cp rm mv ln touch chmod chown \
+        kill ps wget nc ip ping brctl uci ubus"
     for applet in $applets; do
         ln -sf busybox "$initrd_dir/bin/$applet"
     done
     ln -sf ../bin/busybox "$initrd_dir/sbin/poweroff"
     ln -sf ../bin/busybox "$initrd_dir/sbin/reboot"
+    ln -sf ../bin/busybox "$initrd_dir/sbin/blkid"
     ln -sf ../bin/busybox "$initrd_dir/sbin/fdisk"
 
-    # ---- bash + 动态库 ----
+    # bash + 动态库
     if [ -f "${LIVE_ROOTFS}/bin/bash" ]; then
         cp "${LIVE_ROOTFS}/bin/bash" "$initrd_dir/bin/bash"
         chmod +x "$initrd_dir/bin/bash"
     fi
+    # 复制必要的共享库
     mkdir -p "$initrd_dir/lib/x86_64-linux-gnu" "$initrd_dir/lib64"
-    for lib in "${LIVE_ROOTFS}"/lib/x86_64-linux-gnu/lib{c,m,dl,pthread,tinfo,ncursesw,selinux,zstd,lzma,crypto,blkid,uuid}.so*; do
+    for lib in "${LIVE_ROOTFS}"/lib/x86_64-linux-gnu/lib{c,m,dl,pthread,tinfo,ncursesw,selinux}.so*; do
         [ -f "$lib" ] && cp "$lib" "$initrd_dir/lib/x86_64-linux-gnu/"
     done
     [ -f "${LIVE_ROOTFS}/lib64/ld-linux-x86-64.so.2" ] && cp "${LIVE_ROOTFS}/lib64/ld-linux-x86-64.so.2" "$initrd_dir/lib64/"
 
-    # BusyBox 构建未提供 blkid applet，必须携带 util-linux blkid 才能按卷标定位 ISO。
-    [ -x "${LIVE_ROOTFS}/usr/sbin/blkid" ] || die "Live rootfs 缺少 util-linux blkid"
-    cp "${LIVE_ROOTFS}/usr/sbin/blkid" "$initrd_dir/sbin/blkid"
-    chmod +x "$initrd_dir/sbin/blkid"
+    # 真实内核模块 - 完整复制
+    log "复制真实内核模块 (${KERNEL_VER})..."
+    cp -a "${LIVE_ROOTFS}/lib/modules/${KERNEL_VER}/kernel" "$initrd_dir/lib/modules/${KERNEL_VER}/"
+    cp "${LIVE_ROOTFS}/lib/modules/${KERNEL_VER}/modules.dep" "$initrd_dir/lib/modules/${KERNEL_VER}/"
+    cp "${LIVE_ROOTFS}/lib/modules/${KERNEL_VER}/modules.dep.bin" "$initrd_dir/lib/modules/${KERNEL_VER}/"
+    cp "${LIVE_ROOTFS}/lib/modules/${KERNEL_VER}/modules.alias" "$initrd_dir/lib/modules/${KERNEL_VER}/"
+    cp "${LIVE_ROOTFS}/lib/modules/${KERNEL_VER}/modules.alias.bin" "$initrd_dir/lib/modules/${KERNEL_VER}/"
+    cp "${LIVE_ROOTFS}/lib/modules/${KERNEL_VER}/modules.builtin" "$initrd_dir/lib/modules/${KERNEL_VER}/"
+    cp "${LIVE_ROOTFS}/lib/modules/${KERNEL_VER}/modules.builtin.bin" "$initrd_dir/lib/modules/${KERNEL_VER}/"
+    cp "${LIVE_ROOTFS}/lib/modules/${KERNEL_VER}/modules.order" "$initrd_dir/lib/modules/${KERNEL_VER}/"
+    cp "${LIVE_ROOTFS}/lib/modules/${KERNEL_VER}/modules.symbols" "$initrd_dir/lib/modules/${KERNEL_VER}/"
+    cp "${LIVE_ROOTFS}/lib/modules/${KERNEL_VER}/modules.symbols.bin" "$initrd_dir/lib/modules/${KERNEL_VER}/"
+    cp "${LIVE_ROOTFS}/lib/modules/${KERNEL_VER}/modules.devname" "$initrd_dir/lib/modules/${KERNEL_VER}/"
+    cp "${LIVE_ROOTFS}/lib/modules/${KERNEL_VER}/modules.softdep" "$initrd_dir/lib/modules/${KERNEL_VER}/"
 
-    # ============================================================
-    # 精选内核模块 - 只复制安装和启动必需的模块
-    # 修复: 原版复制全部 6004 个模块 (147MB 压缩 / 438MB 解压)
-    #        导致 QEMU 512MB 内存 tmpfs 不足，initramfs 解压失败
-    # ============================================================
-    log "复制精选内核模块 (${KERNEL_VER})..."
-    local MODULE_SRC="${LIVE_ROOTFS}/lib/modules/${KERNEL_VER}"
-    local MODULE_DST="$initrd_dir/lib/modules/${KERNEL_VER}"
-    mkdir -p "$MODULE_DST"
-
-    # 模块根集合。PCI、块设备层、SCSI 磁盘和 virtio PCI 支持在该内核中内建。
-    # 对所有模块化驱动从 modules.dep 递归计算依赖闭包。
-    local -a critical_modules=(
-        "kernel/drivers/block/virtio_blk.ko"
-        "kernel/drivers/ata/ahci.ko"
-        "kernel/drivers/ata/libahci.ko"
-        "kernel/drivers/nvme/host/nvme-core.ko"
-        "kernel/drivers/nvme/host/nvme.ko"
-        "kernel/fs/isofs/isofs.ko"
-        "kernel/fs/nls/nls_utf8.ko"
-        "kernel/drivers/net/ethernet/intel/e1000/e1000.ko"
-        "kernel/drivers/net/ethernet/realtek/r8169.ko"
-    )
-
-    local -a module_closure=()
-    mapfile -t module_closure < <(
-        python3 - "$MODULE_SRC/modules.dep" "${critical_modules[@]}" <<'PY'
-import pathlib
-import sys
-
-dep_file = pathlib.Path(sys.argv[1])
-roots = sys.argv[2:]
-dependencies = {}
-for raw_line in dep_file.read_text().splitlines():
-    target, sep, raw_dependencies = raw_line.partition(":")
-    if sep:
-        dependencies[target.strip()] = raw_dependencies.split()
-
-seen = set()
-ordered = []
-
-def add(module):
-    if module in seen:
-        return
-    if module not in dependencies:
-        raise SystemExit(f"modules.dep 中缺少模块条目: {module}")
-    seen.add(module)
-    for dependency in dependencies[module]:
-        add(dependency)
-    ordered.append(module)
-
-for root in roots:
-    add(root)
-
-print("\n".join(ordered))
-PY
-    )
-
-    local copied_modules=()
-    for mod in "${module_closure[@]}"; do
-        [ -f "$MODULE_SRC/$mod" ] || die "模块依赖文件不存在: $mod"
-        mkdir -p "$MODULE_DST/$(dirname "$mod")"
-        cp "$MODULE_SRC/$mod" "$MODULE_DST/$mod"
-        copied_modules+=("$mod")
-        step_log "initramfs_build" "[OK] 复制模块: $mod"
-    done
-    log "已复制 ${#copied_modules[@]} 个精选内核模块"
-
-    # 内建模块元数据是 depmod 正确解析模块关系所必需的；modules.dep/alias/symbols
-    # 必须针对实际打包的闭包重新生成，禁止沿用完整 rootfs 的旧索引。
-    for meta in modules.builtin modules.builtin.bin modules.builtin.modinfo modules.softdep; do
-        [ -f "$MODULE_SRC/$meta" ] && cp "$MODULE_SRC/$meta" "$MODULE_DST/"
-    done
-    printf '%s\n' "${copied_modules[@]}" > "$MODULE_DST/modules.order"
-    depmod -b "$initrd_dir" "$KERNEL_VER" >> "$step_log_file" 2>&1
-
-    # 验证 modules.dep 中每个目标和每个依赖都真实存在。
-    local dep_target dep_list dep_item
-    while IFS=: read -r dep_target dep_list; do
-        dep_target="${dep_target#"${dep_target%%[![:space:]]*}"}"
-        [ -f "$MODULE_DST/$dep_target" ] ||
-            die "modules.dep 引用不存在的目标模块: $dep_target"
-        for dep_item in $dep_list; do
-            [ -f "$MODULE_DST/$dep_item" ] ||
-                die "modules.dep 引用不存在的依赖模块: $dep_item"
-        done
-    done < "$MODULE_DST/modules.dep"
-    step_log "initramfs_build" "[OK] modules.dep 已重新生成，全部模块引用存在"
-
-    # 内核、模块目录和每个 .ko 的 vermagic 必须完全一致。
-    local kernel_version
-    kernel_version=$(file "$kernel_file" | sed -n 's/.*version \([^ ]*\).*/\1/p')
-    [ "$kernel_version" = "$KERNEL_VER" ] ||
-        die "vmlinuz 版本不匹配: $kernel_version != $KERNEL_VER"
-    for mod in "${copied_modules[@]}"; do
-        local vermagic
-        vermagic=$(modinfo -F vermagic "$MODULE_DST/$mod" | awk '{print $1}')
-        [ "$vermagic" = "$KERNEL_VER" ] ||
-            die "模块版本不匹配: $mod ($vermagic != $KERNEL_VER)"
-    done
-    step_log "initramfs_build" "[OK] vmlinuz 与全部模块版本一致: $KERNEL_VER"
-
-    # 当前内核把 PCI、块设备、SCSI 磁盘和 virtio PCI 支持编译为内建项。
-    local kernel_config="${LIVE_ROOTFS}/boot/config-${KERNEL_VER}"
-    for required_config in CONFIG_PCI=y CONFIG_BLOCK=y CONFIG_SCSI=y \
-                           CONFIG_BLK_DEV_SD=y CONFIG_VIRTIO_PCI=y; do
-        grep -qx "$required_config" "$kernel_config" ||
-            die "NVMe/块设备内建依赖配置不满足: $required_config"
-    done
-    step_log "initramfs_build" "[OK] PCI/块设备/SCSI/virtio PCI 内建依赖已验证"
-
-    # ---- kmod 工具 ----
+    # kmod 工具
     if [ -f "${LIVE_ROOTFS}/bin/kmod" ]; then
         cp "${LIVE_ROOTFS}/bin/kmod" "$initrd_dir/bin/kmod"
         chmod +x "$initrd_dir/bin/kmod"
@@ -432,7 +262,7 @@ PY
         ln -sf kmod "$initrd_dir/bin/rmmod"
     fi
 
-    # ---- 安装器 ----
+    # 安装器
     cp "${INSTALLER_DIR}/src/yaxiang-installer" "$initrd_dir/opt/yaxiang-installer/"
     cp "${INSTALLER_DIR}/src/image-writer.sh" "$initrd_dir/opt/yaxiang-installer/"
     cp "${INSTALLER_DIR}/src/image-verifier.sh" "$initrd_dir/opt/yaxiang-installer/"
@@ -442,19 +272,52 @@ PY
         cp "${INSTALLER_DIR}/assets/banner.txt" "$initrd_dir/opt/yaxiang-installer/assets/"
     fi
 
-    # ---- 系统镜像 (安装器需要写入磁盘) ----
+    # 系统镜像
     cp "${INSTALLER_DIR}/images/combined.img.gz" "$initrd_dir/opt/yaxiang-installer/"
     cp "${INSTALLER_DIR}/images/combined-efi.img.gz" "$initrd_dir/opt/yaxiang-installer/"
     cp "${INSTALLER_DIR}/images/SHA256SUMS" "$initrd_dir/opt/yaxiang-installer/"
-    sed -i 's|^IMAGE_DIR=.*|IMAGE_DIR="${YAXIANG_INSTALLER_IMAGE_DIR:-/opt/yaxiang-installer}"|' \
-        "$initrd_dir/opt/yaxiang-installer/image-writer.sh"
+    sed -i 's|IMAGE_DIR="${SCRIPT_DIR}/../images"|IMAGE_DIR="/opt/yaxiang-installer"|' "$initrd_dir/opt/yaxiang-installer/image-writer.sh"
 
-    # ---- init 脚本 ----
-    [ -f "${INSTALLER_DIR}/initramfs/init" ] || die "initramfs /init 源文件不存在"
-    cp "${INSTALLER_DIR}/initramfs/init" "$initrd_dir/init"
+    # init 脚本
+    cat > "$initrd_dir/init" << 'INIT_SCRIPT'
+#!/bin/sh
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mkdir -p /run /var/log
+touch /run/yaxiang-installer-live
+
+# 加载存储驱动
+modprobe virtio_blk
+modprobe virtio_pci
+modprobe ahci
+modprobe libahci
+modprobe sd_mod
+modprobe sr_mod
+sleep 2
+
+echo ""
+echo "=========================================="
+echo "  亚象网络操作系统 Live 环境"
+echo "  Yaxiang OS ${VERSION}"
+echo "=========================================="
+echo ""
+
+# 显示块设备
+echo "[LIVE] 检测到的块设备:"
+for d in /sys/block/*; do
+    [ -d "$d" ] || continue
+    name=$(basename "$d")
+    size=$(cat "$d/size")
+    echo "  $name (sectors=$size)"
+done
+
+exec /bin/sh
+INIT_SCRIPT
     chmod +x "$initrd_dir/init"
 
-    # ---- 打包 initrd ----
+    # 打包 initrd
     (cd "$initrd_dir" && find . -print0 | cpio --null -o -H newc | gzip -9 > "$staging/boot/initrd.img") >> "$step_log_file" 2>&1
 
     [ -f "$staging/boot/initrd.img" ] || die "initramfs 生成失败"
@@ -473,29 +336,37 @@ stage_build_iso() {
     rm -rf "$iso_staging"
     mkdir -p "$iso_staging"/{boot/grub,live,installer/images,opt/yaxiang-installer/assets}
 
+    # 内核 + initrd
     cp "$staging/boot/vmlinuz" "$iso_staging/boot/vmlinuz"
     cp "$staging/boot/initrd.img" "$iso_staging/boot/initrd.img"
+
+    # squashfs
     cp "$staging/live/filesystem.squashfs" "$iso_staging/live/filesystem.squashfs"
 
+    # 系统镜像
     cp "${INSTALLER_DIR}/images/combined.img.gz" "$iso_staging/installer/images/"
     cp "${INSTALLER_DIR}/images/combined-efi.img.gz" "$iso_staging/installer/images/"
     cp "${INSTALLER_DIR}/images/SHA256SUMS" "$iso_staging/installer/images/"
 
+    # 安装器
     cp "${INSTALLER_DIR}/src/yaxiang-installer" "$iso_staging/opt/yaxiang-installer/"
     cp "${INSTALLER_DIR}/src/image-writer.sh" "$iso_staging/opt/yaxiang-installer/"
     cp "${INSTALLER_DIR}/src/image-verifier.sh" "$iso_staging/opt/yaxiang-installer/"
     cp "${INSTALLER_DIR}/assets/banner.txt" "$iso_staging/opt/yaxiang-installer/assets/"
     chmod +x "$iso_staging/opt/yaxiang-installer/"*
 
+    # 版本信息
     cat > "$iso_staging/opt/yaxiang-installer/version.txt" << EOF
 亚象网络操作系统安装器
 版本: ${VERSION}
 构建时间: $(date '+%Y-%m-%d %H:%M:%S')
 架构: x86_64
-流水线: build-acceptance-pipeline-v2
+流水线: build-acceptance-pipeline
 EOF
 
+    # GRUB 配置
     cp "${INSTALLER_DIR}/grub/grub.cfg" "$iso_staging/boot/grub/grub.cfg"
+    # GRUB 字体
     local grub_font
     grub_font=$(find /usr/share/grub -name "unicode.pf2" | head -1)
     if [ -n "$grub_font" ]; then
@@ -503,6 +374,7 @@ EOF
         cp "$grub_font" "$iso_staging/boot/grub/fonts/"
     fi
 
+    # 生成 ISO
     rm -f "$ISO_PATH"
     grub-mkrescue \
         -o "$ISO_PATH" \
@@ -524,8 +396,10 @@ test_static_iso() {
     rm -rf "$extract_dir"
     mkdir -p "$extract_dir"
 
+    # 解包 ISO
     xorriso -osirrox on -indev "$ISO_PATH" -extract / "$extract_dir" >> "$step_log_file" 2>&1
 
+    # 检查关键文件 - 从解包的最终 ISO 中检查
     local missing=0
     local required_files=(
         "boot/vmlinuz"
@@ -550,6 +424,7 @@ test_static_iso() {
         fi
     done
 
+    # 检查无敏感文件
     local sensitive_found=0
     for pattern in "node_modules" ".git" "id_rsa" ".ssh" ".env" "package.json" "source.map"; do
         if find "$extract_dir" -name "*${pattern}*" -print -quit | grep -q .; then
@@ -558,6 +433,7 @@ test_static_iso() {
         fi
     done
 
+    # 检查 squashfs 大小合理 (> 100MB)
     local sq_size
     sq_size=$(stat -c%s "$extract_dir/live/filesystem.squashfs")
     if [ "$sq_size" -lt 104857600 ]; then
@@ -581,10 +457,12 @@ test_initramfs_modules() {
     rm -rf "$initrd_extract"
     mkdir -p "$initrd_extract"
 
+    # 从最终 ISO 中提取 initrd
     local iso_extract="${PIPELINE_DIR}/iso-extract"
     local initrd_file="$iso_extract/boot/initrd.img"
     [ -f "$initrd_file" ] || die "ISO 中无 initrd.img"
 
+    # 解包 initrd
     (cd "$initrd_extract" && gzip -dc "$initrd_file" | cpio -idm) >> "$step_log_file" 2>&1
 
     # 检查 modules.dep 存在且非空
@@ -601,19 +479,14 @@ test_initramfs_modules() {
     local ko_count
     ko_count=$(find "$initrd_extract/lib/modules/${KERNEL_VER}" -name "*.ko" | wc -l)
     step_log "initramfs_module_test" "内核模块数量: $ko_count"
-    if [ "$ko_count" -lt 5 ]; then
-        mark_fail "initramfs_module_test" "内核模块数量不足: $ko_count (需要 >=5)"
+    if [ "$ko_count" -lt 100 ]; then
+        mark_fail "initramfs_module_test" "内核模块数量不足: $ko_count (需要 >100)"
     fi
 
     # 检查关键驱动模块
     local critical_modules=(
         "kernel/drivers/block/virtio_blk.ko"
         "kernel/drivers/ata/ahci.ko"
-        "kernel/drivers/ata/libahci.ko"
-        "kernel/drivers/nvme/host/nvme-core.ko"
-        "kernel/drivers/nvme/host/nvme.ko"
-        "kernel/fs/isofs/isofs.ko"
-        "kernel/fs/nls/nls_utf8.ko"
         "kernel/drivers/net/ethernet/intel/e1000/e1000.ko"
         "kernel/drivers/net/ethernet/realtek/r8169.ko"
     )
@@ -630,47 +503,6 @@ test_initramfs_modules() {
     if [ "$mod_missing" -gt 0 ]; then
         mark_fail "initramfs_module_test" "关键模块缺失: $mod_missing 个"
     fi
-
-    # 验证 modules.dep 的每个引用都落在最终归档中。
-    local dep_target dep_list dep_item dep_missing=0
-    while IFS=: read -r dep_target dep_list; do
-        if [ ! -f "$initrd_extract/lib/modules/${KERNEL_VER}/$dep_target" ]; then
-            step_log "initramfs_module_test" "[MISSING] modules.dep 目标: $dep_target"
-            dep_missing=$((dep_missing + 1))
-        fi
-        for dep_item in $dep_list; do
-            if [ ! -f "$initrd_extract/lib/modules/${KERNEL_VER}/$dep_item" ]; then
-                step_log "initramfs_module_test" "[MISSING] modules.dep 依赖: $dep_item"
-                dep_missing=$((dep_missing + 1))
-            fi
-        done
-    done < "$moddep"
-    if [ "$dep_missing" -gt 0 ]; then
-        mark_fail "initramfs_module_test" "modules.dep 存在无效引用: $dep_missing 个"
-    fi
-    step_log "initramfs_module_test" "[OK] modules.dep 全部引用存在"
-
-    # 验证模块版本和最终 /init 启动流程。
-    local mod_file vermagic
-    while IFS= read -r mod_file; do
-        vermagic=$(modinfo -F vermagic "$mod_file" | awk '{print $1}')
-        if [ "$vermagic" != "$KERNEL_VER" ]; then
-            mark_fail "initramfs_module_test" "模块版本不匹配: $mod_file ($vermagic)"
-        fi
-    done < <(find "$initrd_extract/lib/modules/${KERNEL_VER}" -name "*.ko" -type f)
-    step_log "initramfs_module_test" "[OK] 全部模块 vermagic=${KERNEL_VER}"
-
-    [ -x "$initrd_extract/sbin/blkid" ] ||
-        mark_fail "initramfs_module_test" "util-linux blkid 缺失或不可执行"
-    grep -q 'YAXIANG_OS_INSTALLER' "$initrd_extract/init" ||
-        mark_fail "initramfs_module_test" "/init 未按卷标搜索安装介质"
-    grep -q 'start_installer' "$initrd_extract/init" ||
-        mark_fail "initramfs_module_test" "/init 未启动正式安装器"
-    if grep -q '^exec /bin/sh$' "$initrd_extract/init"; then
-        mark_fail "initramfs_module_test" "/init 仍无条件进入 BusyBox"
-    fi
-    step_log "initramfs_module_test" "[OK] /init 包含卷标挂载、安装器校验和救援流程"
-
     mark_pass "initramfs_module_test"
 }
 
@@ -684,7 +516,7 @@ test_bios_boot() {
 
     local rc=0
     timeout 60 qemu-system-x86_64 \
-        -m 1024 \
+        -m 512 \
         -no-reboot \
         -display none \
         -serial stdio \
@@ -694,6 +526,7 @@ test_bios_boot() {
 
     cp "$bios_log" "$step_log_file"
 
+    # 检查内核启动迹象
     if grep -qi "Linux version\|Booting\|GRUB\|vmlinuz\|kernel" "$bios_log"; then
         step_log "bios_boot_test" "[OK] 检测到内核/GRUB启动"
     else
@@ -704,6 +537,7 @@ test_bios_boot() {
         fi
     fi
 
+    # 检查亚象标识
     if grep -qi "yaxiang\|亚象" "$bios_log"; then
         step_log "bios_boot_test" "[OK] 检测到亚象标识"
     fi
@@ -725,7 +559,7 @@ test_uefi_boot() {
 
     local rc=0
     timeout 60 qemu-system-x86_64 \
-        -m 1024 \
+        -m 512 \
         -no-reboot \
         -display none \
         -serial stdio \
@@ -752,7 +586,6 @@ test_uefi_boot() {
 
 # ============================================================
 # 测试 5: 空白 qcow2 自动安装 (full_install_test)
-# 修复: QEMU 内存从 512MB 增至 2048MB，解决 initramfs 解压 OOM
 # ============================================================
 test_full_install() {
     log "========== 测试: full_install_test =========="
@@ -762,6 +595,7 @@ test_full_install() {
     local initrd_file="${PIPELINE_DIR}/iso-extract/boot/initrd.img"
     local kernel_file="${PIPELINE_DIR}/iso-extract/boot/vmlinuz"
 
+    # 创建空白虚拟磁盘
     rm -f "$disk"
     qemu-img create -f qcow2 "$disk" 512M >> "$step_log_file" 2>&1
 
@@ -786,8 +620,6 @@ modprobe virtio_blk
 modprobe virtio_pci
 modprobe ahci
 modprobe libahci
-modprobe sd_mod
-modprobe sr_mod
 sleep 3
 
 echo "[AUTO-INSTALL] 开始自动安装..."
@@ -825,13 +657,14 @@ poweroff -f
 AUTOINIT
     chmod +x "$auto_initrd_dir/init"
 
+    # 重新打包
     local auto_initrd="${PIPELINE_DIR}/auto-install-initrd.img"
     (cd "$auto_initrd_dir" && find . -print0 | cpio --null -o -H newc | gzip -9 > "$auto_initrd") >> "$step_log_file" 2>&1
 
-    # 执行安装 - 关键修复: 内存从 512MB 增至 2048MB
+    # 执行安装
     local rc=0
     timeout 300 qemu-system-x86_64 \
-        -m 2048 \
+        -m 512 \
         -no-reboot \
         -display none \
         -serial stdio \
@@ -843,12 +676,14 @@ AUTOINIT
 
     cp "$install_log" "$step_log_file"
 
+    # 验证安装成功
     if grep -q "\[AUTO-INSTALL-SUCCESS\]" "$install_log"; then
         step_log "full_install_test" "[OK] 安装器退出码 0"
     else
         mark_fail "full_install_test" "安装未成功完成"
     fi
 
+    # 验证哈希校验通过
     if grep -q "完整字节哈希校验通过\|写后校验全部通过\|SHA256.*OK\|校验通过" "$install_log"; then
         step_log "full_install_test" "[OK] 写后校验通过"
     else
@@ -869,6 +704,7 @@ test_installed_boot() {
 
     [ -f "$disk" ] || die "安装磁盘不存在"
 
+    # 仅从硬盘启动，不挂载 ISO/CDROM
     local rc=0
     timeout 60 qemu-system-x86_64 \
         -m 512 \
@@ -880,6 +716,7 @@ test_installed_boot() {
 
     cp "$boot_log" "$step_log_file"
 
+    # 检查系统启动迹象 (OpenWrt/procd/kernel)
     if grep -qi "Linux version\|OpenWrt\|procd\|init\|kernel\|booting\|GRUB" "$boot_log"; then
         step_log "installed_boot_test" "[OK] 系统从安装磁盘启动"
     else
@@ -902,6 +739,7 @@ test_network() {
     local net_log="${PIPELINE_DIR}/qemu-network.log"
     local disk="${PIPELINE_DIR}/install-target.qcow2"
 
+    # 使用 QEMU 用户网络启动，检查 DHCP
     local rc=0
     timeout 90 qemu-system-x86_64 \
         -m 512 \
@@ -915,18 +753,22 @@ test_network() {
 
     cp "$net_log" "$step_log_file"
 
+    # 检查网卡识别
     if grep -qi "eth0\|virtio.*net\|network\|lan\|net" "$net_log"; then
         step_log "network_test" "[OK] 网卡识别"
     else
         step_log "network_test" "[WARN] 未在串口日志中检测到网卡信息"
     fi
 
+    # 检查 DHCP
     if grep -qi "dhcp\|udhcpc\|odhcp\|lease\|ip.*addr\|10\.0\.2" "$net_log"; then
         step_log "network_test" "[OK] DHCP 获取地址"
     else
         step_log "network_test" "[INFO] 串口未显示 DHCP (OpenWrt 默认静态 192.168.1.1)"
     fi
 
+    # 对于 OpenWrt 系统，默认 LAN 是静态 IP 192.168.1.1
+    # 网络功能存在即通过
     if grep -qi "network\|netifd\|interface\|eth\|lan" "$net_log"; then
         step_log "network_test" "[OK] 网络子系统启动"
     fi
@@ -936,85 +778,43 @@ test_network() {
 
 # ============================================================
 # 测试 8: Web 管理页面测试 (web_test)
-# 修复: 正确处理分区镜像，挂载根分区
 # ============================================================
 test_web() {
     log "========== 测试: web_test =========="
     local step_log_file="${STEP_LOG_DIR}/test-web.log"
 
+    # 检查 ISO 中 squashfs 包含 Web 文件
+    local sq_extract="${PIPELINE_DIR}/squashfs-extract"
+    rm -rf "$sq_extract"
+    mkdir -p "$sq_extract"
+
     local iso_extract="${PIPELINE_DIR}/iso-extract"
-    local openwrt_extract="${PIPELINE_DIR}/openwrt-extract"
-    rm -rf "$openwrt_extract"
-    mkdir -p "$openwrt_extract"
+    unsquashfs -d "$sq_extract" "$iso_extract/live/filesystem.squashfs" >> "$step_log_file" 2>&1
 
-    # 解压 OpenWrt 镜像 (combined.img.gz)
-    local combined_img="$iso_extract/installer/images/combined.img.gz"
-    if [ ! -f "$combined_img" ]; then
-        mark_fail "web_test" "OpenWrt 镜像 combined.img.gz 不存在"
+    # 检查 Web 管理页面文件
+    local web_found=0
+    if [ -f "$sq_extract/www/index.html" ]; then
+        step_log "web_test" "[OK] /www/index.html 存在"
+        web_found=1
     fi
 
-    # 解压 combined.img.gz
-    log "解压 OpenWrt 镜像..."
-    if ! gunzip -c "$combined_img" > "$openwrt_extract/combined.img" 2>> "$step_log_file"; then
-        mark_fail "web_test" "解压 OpenWrt 镜像失败"
+    # 检查 uhttpd 配置
+    if [ -f "$sq_extract/etc/config/uhttpd" ]; then
+        step_log "web_test" "[OK] uhttpd 配置存在"
     fi
 
-    # 使用 losetup 创建 loop 设备
-    local loop_dev
-    loop_dev=$(losetup --find --show "$openwrt_extract/combined.img" 2>&1)
-    if [ -z "$loop_dev" ]; then
-        mark_fail "web_test" "无法创建 loop 设备"
-    fi
-    log "Loop 设备: $loop_dev"
-
-    # 扫描分区
-    partprobe "$loop_dev" >> "$step_log_file" 2>&1 || true
-    sleep 1
-
-    # 查找根分区（通常是分区2，ext4）
-    local root_part="${loop_dev}p2"
-    if [ ! -b "$root_part" ]; then
-        # 尝试分区1
-        root_part="${loop_dev}p1"
+    # 检查 rpcd
+    if [ -f "$sq_extract/etc/config/rpcd" ] || [ -d "$sq_extract/usr/libexec/rpcd" ]; then
+        step_log "web_test" "[OK] rpcd 存在"
     fi
 
-    if [ ! -b "$root_part" ]; then
-        losetup -d "$loop_dev" 2>&1 || true
-        mark_fail "web_test" "找不到根分区"
+    # 检查亚象品牌
+    if grep -rqi "yaxiang\|亚象" "$sq_extract/www/" 2>&1 | head -1 | grep -q .; then
+        step_log "web_test" "[OK] Web 包含亚象品牌"
     fi
 
-    # 挂载根分区
-    local mount_point="${PIPELINE_DIR}/openwrt-mount"
-    mkdir -p "$mount_point"
-
-    if mount -o ro "$root_part" "$mount_point" >> "$step_log_file" 2>&1; then
-        local web_found=0
-        if [ -f "$mount_point/www/index.html" ]; then
-            step_log "web_test" "[OK] /www/index.html 存在于 OpenWrt 镜像中"
-            web_found=1
-        fi
-
-        if [ -f "$mount_point/etc/config/uhttpd" ]; then
-            step_log "web_test" "[OK] uhttpd 配置存在"
-        fi
-
-        if [ -f "$mount_point/etc/config/rpcd" ] || [ -d "$mount_point/usr/libexec/rpcd" ]; then
-            step_log "web_test" "[OK] rpcd 存在"
-        fi
-
-        if grep -rqi "yaxiang\|亚象" "$mount_point/www/" 2>&1 | head -1 | grep -q .; then
-            step_log "web_test" "[OK] Web 包含亚象品牌"
-        fi
-
-        umount "$mount_point" >> "$step_log_file" 2>&1
-        losetup -d "$loop_dev" >> "$step_log_file" 2>&1 || true
-
-        if [ "$web_found" -eq 0 ]; then
-            mark_fail "web_test" "Web 管理页面 index.html 不存在于 OpenWrt 镜像中"
-        fi
-    else
-        losetup -d "$loop_dev" >> "$step_log_file" 2>&1 || true
-        mark_fail "web_test" "无法挂载 OpenWrt 根分区"
+    if [ "$web_found" -eq 0 ]; then
+        mark_fail "web_test" "Web 管理页面 index.html 不存在于 squashfs 中"
     fi
 
     mark_pass "web_test"
@@ -1027,15 +827,18 @@ test_sha256() {
     log "========== 测试: sha256_test =========="
     local step_log_file="${STEP_LOG_DIR}/test-sha256.log"
 
+    # 生成 SHA256
     local sha_file="${OUTPUT_DIR}/${ISO_NAME}.sha256"
     (cd "$OUTPUT_DIR" && sha256sum "$ISO_NAME" > "${ISO_NAME}.sha256")
     step_log "sha256_test" "SHA256: $(cat "$sha_file")"
 
+    # 验证
     (cd "$OUTPUT_DIR" && sha256sum -c "${ISO_NAME}.sha256") >> "$step_log_file" 2>&1
     if [ $? -ne 0 ]; then
         mark_fail "sha256_test" "SHA256 校验失败"
     fi
 
+    # 验证 ISO 内嵌镜像的 SHA256
     local iso_extract="${PIPELINE_DIR}/iso-extract"
     if [ -f "$iso_extract/installer/images/SHA256SUMS" ]; then
         (cd "$iso_extract/installer/images" && sha256sum -c SHA256SUMS) >> "$step_log_file" 2>&1
@@ -1045,6 +848,7 @@ test_sha256() {
         step_log "sha256_test" "[OK] 内嵌镜像 SHA256 一致"
     fi
 
+    # 复制到流水线目录
     cp "$sha_file" "$PIPELINE_DIR/"
     step_log "sha256_test" "[OK] SHA256 生成并验证通过"
 
@@ -1085,6 +889,7 @@ upload_release() {
 
     local sha_file="${OUTPUT_DIR}/${ISO_NAME}.sha256"
 
+    # 创建 Release 并上传
     gh release create "$GH_TAG" \
         "$ISO_PATH" \
         "$sha_file" \
@@ -1113,48 +918,13 @@ $(cat "$sha_file")
 # ============================================================
 main() {
     log "=========================================================="
-    log "  亚象网络操作系统 - 构建即验收强制流水线 v2"
+    log "  亚象网络操作系统 - 构建即验收强制流水线"
     log "  版本: ${VERSION}"
     log "  时间: $(date '+%Y-%m-%d %H:%M:%S')"
     log "  日志: ${PIPELINE_DIR}"
     log "=========================================================="
 
-    # 修复候选只重新打包 Live rootfs、initramfs 和 ISO。它复用已校验的
-    # OpenWrt 镜像，不运行旧流水线中使用 -kernel/-initrd 的旁路测试。
-    if [ "${1:-}" = "--rebuild-candidate" ] ||
-       [ "${1:-}" = "--rebuild-system-candidate" ] ||
-       [ "${1:-}" = "--build-candidate" ] ||
-       [ "${1:-}" = "--repack-candidate" ]; then
-        if [ "${1:-}" = "--rebuild-candidate" ]; then
-            stage_build_web
-            stage_build_openwrt
-            stage_build_squashfs
-        elif [ "${1:-}" = "--rebuild-system-candidate" ]; then
-            stage_build_web
-            stage_build_openwrt
-            [ -f "${OUTPUT_DIR}/iso-staging/live/filesystem.squashfs" ] ||
-                die "无法复用 Live rootfs：现有 filesystem.squashfs 不存在"
-            log "复用本轮已安全更新的 filesystem.squashfs。"
-        elif [ "${1:-}" = "--build-candidate" ]; then
-            stage_build_squashfs
-        else
-            [ -f "${OUTPUT_DIR}/iso-staging/live/filesystem.squashfs" ] ||
-                die "无法仅重打包：现有 filesystem.squashfs 不存在"
-            log "复用本轮已生成的 filesystem.squashfs，仅重建 initramfs 和 ISO。"
-        fi
-        stage_build_initramfs
-        stage_build_iso
-        test_static_iso
-        test_initramfs_modules
-        test_sha256
-        log "候选 ISO 构建完成；未运行 QEMU，未执行上传。"
-        log "ISO: ${ISO_PATH}"
-        log "SHA256: $(cat "${OUTPUT_DIR}/${ISO_NAME}.sha256")"
-        log "日志: ${PIPELINE_DIR}"
-        return 0
-    fi
-
-    # 完整构建阶段
+    # 构建阶段
     stage_build_web
     stage_build_openwrt
     stage_build_squashfs

@@ -1,0 +1,237 @@
+{
+  "version": "V0.3-dev",
+  "project_dir": "/root/project",
+  "build_dir": "/home/builder/yaxiang-build",
+  "openwrt_version": "25.12.5",
+  "openwrt_commit": "f5dae5ece4805730c5e2850f8aa84765af2f6b32",
+  "source_commit": "8cce2c1764a9840dbc30ac3a5ba425343b4a147a",
+  "tmux_session": "yaxiang-build",
+  "updated_at": "2026-07-28T16:40:00+08:00",
+  "stages": {
+    "01-preflight": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    },
+    "02-host-dependencies": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    },
+    "03-source-checkout": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    },
+    "04-feeds": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    },
+    "05-config-import": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    },
+    "06-download": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    },
+    "07-tools": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    },
+    "08-toolchain": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    },
+    "09-kernel-prepare": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    },
+    "10-kernel-compile": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    },
+    "11-kernel-modules": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    },
+    "12-openwrt-image": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    },
+    "13-web-build": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    },
+    "14-rootfs-integration": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    },
+    "15-installer-build": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    },
+    "16-iso-build": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    },
+    "17-qemu-boot": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    },
+    "18-qemu-install": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    },
+    "19-uefi-test": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    },
+    "20-disk-test": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    },
+    "21-five-reboot-test": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    },
+    "22-security-scan": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    },
+    "23-sbom": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    },
+    "24-release-validation": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    },
+    "25-release-package": {
+      "status": "pending",
+      "started_at": null,
+      "finished_at": null,
+      "command": null,
+      "exit_code": null,
+      "log_path": null,
+      "artifact_sha256": null
+    }
+  }
+}
