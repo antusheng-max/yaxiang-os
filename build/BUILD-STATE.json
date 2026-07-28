@@ -4,9 +4,31 @@
   "build_dir": "/home/builder/yaxiang-build",
   "openwrt_version": "25.12.5",
   "openwrt_commit": "f5dae5ece4805730c5e2850f8aa84765af2f6b32",
-  "source_commit": "8cce2c1764a9840dbc30ac3a5ba425343b4a147a",
+  "source_commit": "1cf715ec57c195a9cf48809291f50ded98c13797",
   "tmux_session": "yaxiang-build",
-  "updated_at": "2026-07-28T16:40:00+08:00",
+  "updated_at": "2026-07-28T16:52:00+08:00",
+  "source_commits": {
+    "C1-openwrt": {
+      "sha": "7826550095bb4b8d1f3bb0d8f0728e860bdb7668",
+      "files": 101,
+      "message": "feat(openwrt): restore overlay and yaxiang packages after recovery"
+    },
+    "C2-installer": {
+      "sha": "ea286c0d5230863a94b974b20fab9ef298f36a0e",
+      "files": 5,
+      "message": "feat(installer): restore installer sources and initramfs assets"
+    },
+    "C3-web": {
+      "sha": "cdba3be7dc0006849d502f847a35dad16dee3162",
+      "files": 1,
+      "message": "feat(web): update system settings view after recovery"
+    },
+    "C4-build-control": {
+      "sha": "1cf715ec57c195a9cf48809291f50ded98c13797",
+      "files": 12,
+      "message": "chore(build): add build control docs, scripts and state tracking"
+    }
+  },
   "stages": {
     "01-preflight": {
       "status": "pending",
