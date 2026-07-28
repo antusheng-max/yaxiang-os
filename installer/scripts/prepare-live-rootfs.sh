@@ -18,6 +18,7 @@ LOG_FILE="${LOG_DIR}/live-build-current.log"
 
 SUITE="jammy"
 MIRROR="http://archive.ubuntu.com/ubuntu"
+SECURITY_MIRROR="http://security.ubuntu.com/ubuntu"
 ARCH="amd64"
 
 # --- 日志函数 ---
@@ -100,6 +101,12 @@ install_tools() {
     mount --bind /proc "$ROOTFS_DIR/proc" 2>/dev/null || true
     mount --bind /sys "$ROOTFS_DIR/sys" 2>/dev/null || true
     
+    cat > "$ROOTFS_DIR/etc/apt/sources.list" << SOURCES
+deb ${MIRROR} ${SUITE} main restricted universe multiverse
+deb ${MIRROR} ${SUITE}-updates main restricted universe multiverse
+deb ${SECURITY_MIRROR} ${SUITE}-security main restricted universe multiverse
+SOURCES
+
     # 安装必要工具包
     local packages=(
         # 磁盘工具
@@ -116,7 +123,10 @@ install_tools() {
         "kmod"              # 内核模块管理
         
         # 存储驱动支持 (内核模块自动包含)
-        "linux-image-generic"  # 完整内核含驱动
+        # Jammy GA kernel is a build input for vmlinuz and the curated
+        # initramfs module closure. The complete kernel/module packages are
+        # deliberately excluded from the dormant Live squashfs at packaging.
+        "linux-image-generic"
         
         # 基础工具
         "bash"
@@ -139,6 +149,10 @@ install_tools() {
     log "安装工具包: ${packages[*]}"
     chroot "$ROOTFS_DIR" apt-get update -qq 2>&1 | while IFS= read -r line; do
         log "  apt-update: $line"
+    done
+
+    DEBIAN_FRONTEND=noninteractive chroot "$ROOTFS_DIR" apt-get full-upgrade -y 2>&1 | while IFS= read -r line; do
+        log "  apt-upgrade: $line"
     done
     
     chroot "$ROOTFS_DIR" apt-get install -y --no-install-recommends "${packages[@]}" 2>&1 | while IFS= read -r line; do
@@ -218,8 +232,9 @@ tmpfs           /tmp     tmpfs   defaults,noatime  0      0
 tmpfs           /run     tmpfs   defaults,noatime  0      0
 FSTAB
     
-    # 设置 root 密码为空（Live 环境）
-    chroot "$ROOTFS_DIR" passwd -d root 2>/dev/null || true
+    # Live root is local-console-only. Keep the account locked; the installer
+    # is launched directly and no remote authentication service is installed.
+    chroot "$ROOTFS_DIR" passwd -l root 2>/dev/null || true
     
     log "Live 环境配置完成"
 }

@@ -9,7 +9,9 @@ set -euo pipefail
 
 WRITER_VERSION="0.2-dev"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-IMAGE_DIR="${SCRIPT_DIR}/../images"
+# initramfs 会在验证 ISO 卷标和安装文件后显式传入挂载介质中的镜像目录。
+# 保留原相对路径作为源码树/历史测试的兼容回退。
+IMAGE_DIR="${YAXIANG_INSTALLER_IMAGE_DIR:-${SCRIPT_DIR}/../images}"
 LOG_FILE="/var/log/yaxiang-installer.log"
 TEST_LOG=""
 

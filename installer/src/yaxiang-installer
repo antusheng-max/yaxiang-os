@@ -841,13 +841,17 @@ main() {
                 ;;
             5)
                 echo "正在重启..."
-                reboot 2>/dev/null || true
-                exit 0
+                sync
+                reboot -f
+                echo "[错误] 重启请求失败。"
+                return 1
                 ;;
             6)
                 echo "正在关机..."
-                poweroff 2>/dev/null || true
-                exit 0
+                sync
+                poweroff -f
+                echo "[错误] 关机请求失败。"
+                return 1
                 ;;
             *)
                 echo "无效选择，请重试。"

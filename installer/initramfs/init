@@ -1,0 +1,140 @@
+#!/bin/sh
+
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+readonly INSTALL_MEDIA_LABEL="YAXIANG_OS_INSTALLER"
+readonly INSTALL_MEDIA_MOUNT="/run/yaxiang-installer-media"
+
+rescue_shell() {
+    echo ""
+    echo "============================================================"
+    echo "[INIT][ERROR] $*"
+    echo "[INIT][ERROR] 正式安装器未启动；系统将进入救援 Shell。"
+    echo "============================================================"
+    exec setsid cttyhack /bin/sh
+}
+
+mount_early_filesystems() {
+    mount -t proc proc /proc ||
+        rescue_shell "无法挂载 /proc"
+    mount -t sysfs sysfs /sys ||
+        rescue_shell "无法挂载 /sys"
+    mount -t devtmpfs devtmpfs /dev ||
+        rescue_shell "无法挂载 /dev"
+    mkdir -p /dev/pts /run /tmp /var/log "$INSTALL_MEDIA_MOUNT"
+    mount -t devpts devpts /dev/pts ||
+        rescue_shell "无法挂载 /dev/pts"
+}
+
+load_storage_drivers() {
+    echo "[INIT] 加载安装所需存储驱动..."
+
+    # PCI、块设备层和 SCSI 磁盘支持由本内核内建。下面加载模块化驱动；
+    # nvme 会通过 modules.dep 自动先加载 nvme-core。
+    for module in nvme virtio_blk ahci libahci isofs nls_utf8; do
+        if modprobe "$module"; then
+            echo "[INIT] 已加载模块: $module"
+        else
+            rescue_shell "无法加载必需存储模块: $module"
+        fi
+    done
+
+    # 这些驱动在当前内核中可能是内建项；modprobe 失败不应阻断启动。
+    for module in virtio_pci sd_mod sr_mod ata_piix; do
+        if modprobe "$module" 2>/dev/null; then
+            echo "[INIT] 已加载模块: $module"
+        else
+            echo "[INIT] 模块已内建或无需加载: $module"
+        fi
+    done
+
+    mdev -s
+    sleep 2
+}
+
+find_install_media() {
+    local media_device=""
+    local device=""
+    local label=""
+
+    media_device="$(blkid -L "$INSTALL_MEDIA_LABEL" 2>/dev/null || true)"
+    if [ -n "$media_device" ] && [ -b "$media_device" ]; then
+        echo "$media_device"
+        return 0
+    fi
+
+    # blkid -L 没有命中时逐设备探测，避免依赖持久化 blkid 缓存。
+    for device in /dev/sr* /dev/sd* /dev/vd* /dev/xvd* \
+                  /dev/nvme*n* /dev/mmcblk*; do
+        [ -b "$device" ] || continue
+        label="$(blkid -p -s LABEL -o value "$device" 2>/dev/null || true)"
+        if [ "$label" = "$INSTALL_MEDIA_LABEL" ]; then
+            echo "$device"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+start_installer() {
+    local media_device=""
+    local installer=""
+    local support=""
+    local image=""
+    local installer_rc=0
+
+    media_device="$(find_install_media)" ||
+        rescue_shell "未找到卷标为 $INSTALL_MEDIA_LABEL 的安装介质"
+
+    echo "[INIT] 找到安装介质: $media_device"
+    mount -t iso9660 -o ro "$media_device" "$INSTALL_MEDIA_MOUNT" ||
+        rescue_shell "无法只读挂载安装介质 $media_device"
+    echo "[INIT] 安装介质已挂载: $INSTALL_MEDIA_MOUNT"
+
+    installer="$INSTALL_MEDIA_MOUNT/opt/yaxiang-installer/yaxiang-installer"
+    [ -f "$installer" ] ||
+        rescue_shell "安装脚本不存在: $installer"
+    [ -x "$installer" ] ||
+        rescue_shell "安装脚本不可执行: $installer"
+
+    for support in image-writer.sh image-verifier.sh; do
+        [ -x "$INSTALL_MEDIA_MOUNT/opt/yaxiang-installer/$support" ] ||
+            rescue_shell "安装器支持脚本缺失或不可执行: $support"
+    done
+
+    for image in combined.img.gz combined-efi.img.gz SHA256SUMS; do
+        [ -f "$INSTALL_MEDIA_MOUNT/installer/images/$image" ] ||
+            rescue_shell "安装源文件缺失: installer/images/$image"
+    done
+
+    export YAXIANG_INSTALLER_IMAGE_DIR="$INSTALL_MEDIA_MOUNT/installer/images"
+    touch /run/yaxiang-installer-live
+
+    echo "[INIT] 安装器及安装源验证通过"
+    echo "[INIT] 启动正式交互安装器: $installer"
+    "$installer" || installer_rc=$?
+    rescue_shell "正式安装器意外退出，退出码: $installer_rc"
+}
+
+mount_early_filesystems
+
+if grep -qw single /proc/cmdline; then
+    rescue_shell "已请求维护模式"
+fi
+
+load_storage_drivers
+
+echo ""
+echo "============================================================"
+echo "  亚象网络操作系统安装环境"
+echo "  Yaxiang OS Installer"
+echo "============================================================"
+echo "[INIT] 检测到的块设备:"
+for block_path in /sys/block/*; do
+    [ -d "$block_path" ] || continue
+    block_name="$(basename "$block_path")"
+    block_size="$(cat "$block_path/size")"
+    echo "  /dev/$block_name (sectors=$block_size)"
+done
+
+start_installer
