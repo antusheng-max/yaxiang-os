@@ -55,17 +55,6 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 pass "Running as root"
 
-# Check disk space
-AVAIL_KB=$(df -k / | awk 'NR==2 {print $4}')
-AVAIL_GB=$((AVAIL_KB / 1024 / 1024))
-echo "Available disk: ${AVAIL_GB}GB (required: ${MIN_DISK_GB}GB)"
-if [ "$AVAIL_GB" -lt "$MIN_DISK_GB" ]; then
-  fail "Insufficient disk space: ${AVAIL_GB}GB < ${MIN_DISK_GB}GB"
-  echo "Finished: $(date -Iseconds)"
-  exit 1
-fi
-pass "Disk space sufficient: ${AVAIL_GB}GB >= ${MIN_DISK_GB}GB"
-
 # Check git availability
 if ! command -v git >/dev/null 2>&1; then
   fail "git command not found"
@@ -219,6 +208,21 @@ else
   # Clone fresh repository
   echo "Cloning OpenWrt repository..."
   echo "This may take 10-15 minutes..."
+  
+  # Check disk space before cloning
+  echo ""
+  echo "Checking disk space for fresh clone..."
+  AVAIL_KB=$(df -k / | awk 'NR==2 {print $4}')
+  AVAIL_GB=$((AVAIL_KB / 1024 / 1024))
+  echo "Available disk: ${AVAIL_GB}GB (required: ${MIN_DISK_GB}GB)"
+  
+  if [ "$AVAIL_GB" -lt "$MIN_DISK_GB" ]; then
+    fail "Insufficient disk space for clone: ${AVAIL_GB}GB < ${MIN_DISK_GB}GB"
+    echo "Finished: $(date -Iseconds)"
+    exit 1
+  fi
+  pass "Disk space sufficient: ${AVAIL_GB}GB >= ${MIN_DISK_GB}GB"
+  echo ""
   
   # Clone as builder user - target specific commit
   # Use --branch master to get latest, then checkout target
